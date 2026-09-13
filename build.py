@@ -94,6 +94,13 @@ head = """<style>
   body.auth-live #addPerson{display:none!important}
   body.auth-live.can-admin #invitePerson{display:inline-flex!important}
   body.auth-live:not(.can-admin) #editInv{display:none!important}
+  /* Only an owner or admin creates project tasks. The database refuses the
+     insert regardless — this stops it being offered. */
+  body.auth-live:not(.can-create) #addBtn,
+  body.auth-live:not(.can-create) #fabAdd,
+  body.auth-live:not(.can-create) [data-add="1"],
+  body.auth-live:not(.can-create) #importPlan,
+  body.auth-live:not(.can-create) #xAdd{display:none!important}
   /* A viewer can read the board and the report, nothing else. The database
      refuses their writes regardless — this just stops them being offered. */
   body.role-viewer #addBtn, body.role-viewer #fabAdd, body.role-viewer [data-add="1"],
@@ -290,11 +297,13 @@ boot = """
       return consumeInvite(pending).catch(function (e) {
         var msg = PB.inviteErrorText ? PB.inviteErrorText(e) : "That invitation is no longer valid.";
         try { sessionStorage.removeItem("pendingInviteToken"); } catch (x) {}
-        if (r.ok) { hideBoot(); chrome(); toastLike(msg); return; }
+        if (r.ok) { chrome(); toastLike(msg); return; }   // the app lifts the shell
         hideBoot(); openNoProject(msg);
       });
     }
-    if (r.ok) { hideBoot(); return chrome(); }
+    // Signed in: the shell stays up until the app says the project is
+    // hydrated. Dismissing it here is what let defaults show for a frame.
+    if (r.ok) { bootMsg("Loading your project\u2026"); return chrome(); }
     if (r.reason === "noproject") { hideBoot(); return openNoProject(""); }
 
     // signed out

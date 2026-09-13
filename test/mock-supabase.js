@@ -106,9 +106,14 @@
       if (op === "delete") need = RANK.admin;
       return r >= need ? null : "new row violates row-level security policy for table \"meta\"";
     }
-    if (t === "tasks" || t === "meetings") {
+    if (t === "tasks") {
+      // creating a task is owner/admin; editing one is the editor's job
+      var need = (op === "insert" || op === "delete") ? RANK.admin : RANK.editor;
+      return r >= need ? null : "new row violates row-level security policy for table \"tasks\"";
+    }
+    if (t === "meetings") {
       var min = op === "delete" ? RANK.admin : RANK.editor;
-      return r >= min ? null : "new row violates row-level security policy for table \"" + t + "\"";
+      return r >= min ? null : "new row violates row-level security policy for table \"meetings\"";
     }
     return null;
   };
@@ -135,6 +140,9 @@
       .map(function (p) { return { name: p.name, member: p.member }; })[0] || null;
     return out;
   };
+  // tests can set "mocksb-delay" to simulate a slow project load, which is the
+  // only way to observe the window between the loading shell and live data
+  function lag() { try { return Number(localStorage.getItem("mocksb-delay")) || 0; } catch (e) { return 0; } }
   Q.prototype.then = function (res, rej) {
     var d = load(), out = { data: null, error: null }, self = this;
     try {
@@ -175,7 +183,10 @@
         out.data = gone.map(cp);
       }
     } catch (e) { out.error = { message: e.message }; out.data = null; }
-    return Promise.resolve(out).then(res, rej);
+    var ms = lag();
+    var settled = ms ? new Promise(function (r) { setTimeout(function () { r(out); }, ms); })
+                     : Promise.resolve(out);
+    return settled.then(res, rej);
   };
 
   Client.prototype.from = function (t) { return new Q(this, t); };

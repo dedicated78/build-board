@@ -166,11 +166,27 @@ create policy invites_admin on public.invites for all to authenticated
   using (public.is_admin(site))
   with check (public.is_admin(site) and public.role_rank(role) <= public.role_rank(public.my_role(site)));
 
--- tasks / meetings: everyone reads, editors and up write, admins delete
+-- tasks: everyone reads; only an owner or admin may CREATE a task, while an
+-- editor may still work on the tasks they have been given. Creating and
+-- editing are deliberately separate permissions.
+drop policy if exists tasks_read on public.tasks;
+drop policy if exists tasks_add  on public.tasks;
+drop policy if exists tasks_edit on public.tasks;
+drop policy if exists tasks_del  on public.tasks;
+create policy tasks_read on public.tasks for select to authenticated
+  using (public.is_member(site));
+create policy tasks_add  on public.tasks for insert to authenticated
+  with check (public.is_admin(site));
+create policy tasks_edit on public.tasks for update to authenticated
+  using (public.has_role(site,'editor')) with check (public.has_role(site,'editor'));
+create policy tasks_del  on public.tasks for delete to authenticated
+  using (public.is_admin(site));
+
+-- meetings: everyone reads, editors and up write, admins delete
 do $$
 declare t text;
 begin
-  foreach t in array array['tasks','meetings'] loop
+  foreach t in array array['meetings'] loop
     execute format('drop policy if exists %I_read on public.%I;', t, t);
     execute format('drop policy if exists %I_add  on public.%I;', t, t);
     execute format('drop policy if exists %I_edit on public.%I;', t, t);

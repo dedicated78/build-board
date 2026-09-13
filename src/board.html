@@ -936,7 +936,9 @@
       </div>
     </div>
     <nav class="tabs" role="tablist">
-      <button role="tab" data-view="board" aria-selected="true">Board</button>
+      <!-- no tab is selected in the markup: setView decides, once, after the
+           saved view is known, so nothing is highlighted before it is chosen -->
+      <button role="tab" data-view="board" aria-selected="false">Board</button>
       <button role="tab" data-view="team" aria-selected="false">Team</button>
       <button role="tab" data-view="report" aria-selected="false">Report</button>
     </nav>
@@ -944,14 +946,14 @@
 
   <!-- ============ BOARD ============ -->
   <div id="view-board" style="display:flex;flex-direction:column;gap:26px">
-    <section class="rail" aria-label="Progress against the approved 94-page inventory">
+    <section class="rail" aria-label="Progress against the approved page inventory">
       <div class="rail-total">
         <div class="rail-head">
           <span class="eyebrow" id="invLabel">Approved page inventory</span>
           <button class="linkbtn tiny" id="importPlan">Import plan</button>
           <button class="linkbtn tiny" id="editInv">Edit</button>
         </div>
-        <div class="big"><span id="tLive">0</span> <span>/ <span id="tTotal">94</span> live</span></div>
+        <div class="big"><span id="tLive">0</span> <span>/ <span id="tTotal">0</span> live</span></div>
         <div class="total-bar"><i class="live" id="barLive"></i><i class="prog" id="barProg"></i></div>
         <div class="legend">
           <b><i class="swatch" style="background:var(--good)"></i>Live</b>
@@ -1281,7 +1283,7 @@
     <button class="btn" id="iSave">Save</button>
     <button class="btn ghost" id="iCancel">Cancel</button>
     <span class="spacer"></span>
-    <button class="btn ghost" id="iReset">Reset to 94</button>
+    <button class="btn ghost" id="iDiscard">Discard changes</button>
   </div>
 </aside>
 <button class="fab no-print" id="fabAdd" aria-label="New task" title="New task">+</button>
@@ -1380,9 +1382,11 @@
     { id: "review",  label: "In review", c: "var(--st-3)" },
     { id: "live",    label: "Live", c: "var(--st-4)" }
   ];
-  // The page inventory is the client's approved plan, so it is data the user owns,
-  // not a constant. Website-page task types are generated from it.
-  var DEFAULT_INVENTORY = [
+  // The page inventory is the client's approved plan — data the project owns.
+  // This list is DEMO SEED ONLY: it is used when Supabase is not configured at
+  // all. In live mode the inventory comes exclusively from the project's saved
+  // rows, and an empty inventory stays empty.
+  var DEMO_INVENTORY = [
     { id: "core", label: "Core pages", target: 7 },
     { id: "service", label: "Service pages", target: 39 },
     { id: "area", label: "Area pages", target: 24 },
@@ -1396,13 +1400,13 @@
   var DEFAULT_NOTIFY = { assigned: true, due: true, overdue: true, blocked: true, meeting: true, digest: true };
   var DUE_STEPS = [3, 1, 0];   // days before a deadline that earn a nudge
 
-  var state = { ready: false, tasks: {}, team: {}, meetings: {}, activity: [], brand: {}, reads: {}, personal: {}, openTask: null,
-                inventory: DEFAULT_INVENTORY.map(function (b) { return { id: b.id, label: b.label, target: b.target }; }),
+  var state = { ready: false, hydrated: false, tasks: {}, team: {}, meetings: {}, activity: [], brand: {}, reads: {}, personal: {}, openTask: null,
+                inventory: [],   // filled from Supabase, or from the demo seed when unconfigured
                 invLabel: "Approved page inventory",
                 filter: "all", wsFilter: "all", mStatus: "writing", me: "", view: "board", profile: null };
   var db = null, sampler = null, downloads = null;
   var editing = null, editingPerson = null, editingMeeting = null, dragId = null;
-  var invDraft = null, invDirty = false;
+  var invDraft = null, invDirty = false, invBaseline = null, drawerCreating = false;
   var seenKeys = null;   // null until the first render, so opening the board is not a burst of toasts
 
   // Snapshot bodies arrive FROZEN. Anything we later edit in place — read receipts,
@@ -1415,7 +1419,14 @@
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
   };
-  var inventory = function () { return state.inventory && state.inventory.length ? state.inventory : DEFAULT_INVENTORY; };
+  /* THE fallback that resurrected the 94-page plan: whenever the project's
+     saved inventory was empty — including the whole window before the remote
+     rows arrived — every caller silently got the demo plan instead. In live
+     mode an empty inventory is now simply empty. */
+  var inventory = function () {
+    if (state.inventory && state.inventory.length) return state.inventory;
+    return live() ? [] : DEMO_INVENTORY;
+  };
   var totalPages = function () {
     return inventory().reduce(function (a, b) { return a + (Number(b.target) || 0); }, 0);
   };
@@ -1529,8 +1540,15 @@
     var msg = (window.PB && PB.friendlyError) ? PB.friendlyError(e) : "Couldn't save. Please try again.";
     if (what === "inventory" && /permission/i.test(msg))
       return "Only an owner or admin can change the approved page inventory. Discuss changes with the project manager.";
+    if (what === "task-create" && /permission/i.test(msg))
+      return CREATE_DENIED;
     return msg;
   }
+  var CREATE_DENIED = "Only an owner or admin can create project tasks. Ask the project manager to create the task for you.";
+  /* Creation is owner/admin only. The database enforces it; this keeps the
+     interface honest and gives a reason rather than a refusal. */
+  function canCreateTasks() { return !live() || (window.PB.isAdmin && PB.isAdmin()); }
+  function blockCreate() { toast(CREATE_DENIED, 5200); return false; }
   var plural = function (n, word) { return n + " " + word + (n === 1 && /s$/.test(word) ? "" : ""); };
 
   function toast(msg, ms) {
@@ -1593,9 +1611,9 @@
     if (db) db.doc("meta/reads").set(state.reads).catch(function () {});
     else localSave();
   }
-  function putTask(id, body) {
+  function putTask(id, body, isNew) {
     state.tasks[id] = body;
-    if (db) db.doc("tasks/" + id).set(body).catch(function (e) { toast(saveErr(e, "task")); });
+    if (db) db.doc("tasks/" + id).set(body).catch(function (e) { toast(saveErr(e, isNew ? "task-create" : "task"), 5200); });
     else localSave();
     render();
   }
@@ -2553,6 +2571,10 @@
 
   /* ===================== master render ===================== */
   function render() {
+    // Until the project's rows are in, there is nothing truthful to draw. The
+    // loading shell holds the screen; drawing defaults here is what produced
+    // the flash between the shell lifting and the live data arriving.
+    if (!state.hydrated) return;
     var list = taskList();
     renderRail(list); renderWsStrip(list); renderChips(list); renderBoard(list);
     renderMeetings(); renderFeed(); renderPickers(); renderTeamView(list);
@@ -2618,6 +2640,7 @@
   }
   function openDrawer(id) {
     var raw = id ? state.tasks[id] : null, isNew = !raw;
+    drawerCreating = isNew;
     var t;
     if (isNew) {
       var n = 1;
@@ -2723,7 +2746,8 @@
       if (!prev.blocked && body.blocked) bits.push("flagged " + editing + " as blocked");
       if (prev.blocked && !body.blocked) bits.push("unblocked " + editing);
     }
-    putTask(editing, body);
+    if (drawerCreating && !canCreateTasks()) { blockCreate(); return; }
+    putTask(editing, body, drawerCreating);
     if (bits.length) { logEvent(bits.join(", ") + (body.note && body.blocked ? " — " + body.note : "")); renderFeed(); }
     closeDrawer();
     toast("Saved");
@@ -3162,13 +3186,18 @@
     invDraft = rows;
   }
   function openInventory() {
-    invDraft = inventory().map(function (b) { return { id: b.id, label: b.label, target: Number(b.target) || 0 }; });
+    // a deep copy of what is saved right now; edits happen on the draft only
+    invBaseline = inventory().map(function (b) { return { id: b.id, label: b.label, target: Number(b.target) || 0 }; });
+    invDraft = invBaseline.map(function (b) { return { id: b.id, label: b.label, target: b.target }; });
     invDirty = false;
     $("iLabel").value = state.invLabel || "Approved page inventory";
     renderInvRows();
     $("scrim").classList.add("open");
     $("idrawer").classList.add("open");
     $("idrawer").setAttribute("aria-hidden", "false");
+  }
+  function adoptInventoryBaseline() {
+    invBaseline = inventory().map(function (b) { return { id: b.id, label: b.label, target: Number(b.target) || 0 }; });
   }
   function closeInventory() {
     $("scrim").classList.remove("open");
@@ -3191,6 +3220,7 @@
     state.inventory = clean;
     state.invLabel = $("iLabel").value.trim() || "Approved page inventory";
     putInventory();
+    adoptInventoryBaseline();   // the saved plan is now the only thing to fall back to
     logEvent("updated the page plan — " + clean.length + " types, " +
       clean.reduce(function (a, b) { return a + b.target; }, 0) + " pages");
     renderFeed();
@@ -3367,7 +3397,7 @@
     if (!e.target.closest("#repMenu") && !e.target.closest("#repFab") && !$("repMenu").hidden) setRepMenu(false);
     var st = e.target.closest("#statusSwitch button");
     if (st) { state.mStatus = st.getAttribute("data-status"); render(); return; }
-    if (e.target.closest('[data-add="1"]')) { openDrawer(null); return; }
+    if (e.target.closest('[data-add="1"]')) { if (canCreateTasks()) openDrawer(null); else blockCreate(); return; }
     if (e.target.closest("#profBack")) { state.profile = null; render(); return; }
     var pbtn = e.target.closest(".linkbtn[data-person]");
     if (pbtn) { openPerson(pbtn.getAttribute("data-person")); return; }
@@ -3561,11 +3591,11 @@
       e.target.value = "";
     }
   });
-  $("addBtn").addEventListener("click", function () { openDrawer(null); });
+  $("addBtn").addEventListener("click", function () { if (canCreateTasks()) openDrawer(null); else blockCreate(); });
   $("addPerson").addEventListener("click", function () { openPerson(null); });
   $("addMeeting").addEventListener("click", function () { openMeeting(null); });
   $("editInv").addEventListener("click", openInventory);
-  $("importPlan").addEventListener("click", openImport);
+  $("importPlan").addEventListener("click", function () { if (canCreateTasks()) openImport(); else blockCreate(); });
   $("xClose").addEventListener("click", closeImport);
   $("xCancel").addEventListener("click", closeImport);
   $("xBack").addEventListener("click", function () {
@@ -3573,7 +3603,7 @@
     $("xAdd").hidden = true; $("xBack").hidden = true;
     $("xHead").textContent = "Import a plan";
   });
-  $("xAdd").addEventListener("click", commitImport);
+  $("xAdd").addEventListener("click", function () { if (canCreateTasks()) commitImport(); else blockCreate(); });
   $("xScan").addEventListener("click", function () { scanPlan($("xPaste").value, "pasted plan"); });
   $("xFile").addEventListener("change", function () {
     var f = this.files && this.files[0];
@@ -3609,12 +3639,13 @@
     var rows = $("invRows").querySelectorAll(".inv-row .lab");
     if (rows.length) rows[rows.length - 1].focus();
   });
-  $("iReset").addEventListener("click", function () {
-    invDraft = DEFAULT_INVENTORY.map(function (b) { return { id: b.id, label: b.label, target: b.target }; });
-    invDirty = true;
+  // Discards edits back to what the project has saved. There is no factory
+  // inventory to restore, and nothing is written until Save.
+  $("iDiscard").addEventListener("click", function () {
+    invDraft = (invBaseline || []).map(function (b) { return { id: b.id, label: b.label, target: b.target }; });
+    invDirty = false;
     renderInvRows();
-    // this only refills the form — nothing reaches the board until Save
-    toast("Reset to the approved 94 pages — press Save to apply", 3600);
+    toast("Changes discarded — back to the saved plan");
   });
   $("invRows").addEventListener("click", function (e) {
     var kill = e.target.closest(".kill");
@@ -3708,6 +3739,7 @@
   });
   $("whoFilter").addEventListener("change", function () { state.filter = this.value; render(); });
   $("fabAdd").addEventListener("click", function () {
+    if (!canCreateTasks()) return blockCreate();
     // the visible column is the obvious place for a new card to land
     openDrawer(null);
     var seg = $("dStatus").querySelector("[data-s='" + state.mStatus + "']");
@@ -3859,7 +3891,12 @@
   // Offline demo boots straight to the board. In live mode the view is chosen
   // once, after auth and the project data have resolved — so nothing renders
   // Board first and then jumps to Team or Report.
-  if (!live()) { state.ready = true; setView("board"); }
+  if (!live()) {
+    if (!state.inventory.length) {
+      state.inventory = DEMO_INVENTORY.map(function (b) { return { id: b.id, label: b.label, target: b.target }; });
+    }
+    state.hydrated = true; state.ready = true; setView("board");
+  }
   syncAppbar();
   window.addEventListener("resize", syncAppbar);
   setTimeout(syncAppbar, 600);
@@ -3880,9 +3917,14 @@
     // the signed-in account IS the identity, at every render from here on
     if (PB.me && PB.me()) state.me = PB.me();
     document.body.classList.add("auth-live");
-    if (PB.isAdmin && PB.isAdmin()) document.body.classList.add("can-admin");
-    // fill every collection before the first paint, so the board never shows
-    // defaults and then swaps them for the project's real figures
+    if (PB.isAdmin && PB.isAdmin()) {
+      document.body.classList.add("can-admin");
+      document.body.classList.add("can-create");
+    }
+    // Stage every collection before anything is assigned to state. Snapshot
+    // callbacks registered below then fire against a cache that is already
+    // complete, so the first render is whole rather than built up piece by
+    // piece as individual requests land.
     if (PB.warmup) { try { await PB.warmup(); } catch (e) {} }
     db.collection("tasks").onSnapshot(function (snap) {
       var next = {}; snap.docs.forEach(function (d) { next[d.id] = clone(d.data()) || {}; });
@@ -3936,6 +3978,11 @@
        remembered. */
     await new Promise(function (res) { setTimeout(res, 0); });
     var restore = savedView();
+    state.hydrated = true;        // one assignment boundary: now the state is whole
+    // A pre-Supabase build of this app cached project rows here. They are no
+    // longer read; drop the one key we know is ours so it cannot mislead
+    // anyone debugging later.
+    try { localStorage.removeItem("rmm-board-local-v2"); } catch (e) {}
     state.ready = true;
     setView(restore || "board");
     render();

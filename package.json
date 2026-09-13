@@ -5,11 +5,12 @@
   "description": "Multi-tenant SEO delivery board \u2014 Supabase backend, static frontend",
   "scripts": {
     "build": "python3 build.py",
-    "test": "node test/board.test.js && node test/roles.test.js && node test/identity.test.js && node test/boot.test.js",
+    "test": "node test/board.test.js && node test/roles.test.js && node test/identity.test.js && node test/boot.test.js && node test/inventory-tasks.test.js",
     "test:board": "node test/board.test.js",
     "test:roles": "node test/roles.test.js",
     "test:identity": "node test/identity.test.js",
-    "test:boot": "node test/boot.test.js"
+    "test:boot": "node test/boot.test.js",
+    "test:inventory": "node test/inventory-tasks.test.js"
   },
   "devDependencies": {
     "playwright": "^1.49.0"

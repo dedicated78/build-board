@@ -45,3 +45,6 @@ jobs:
 
       - name: Boot, view persistence and rejoin
         run: node test/boot.test.js
+
+      - name: Inventory state and task-creation permissions
+        run: node test/inventory-tasks.test.js
