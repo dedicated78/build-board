@@ -23,7 +23,7 @@ const seed={
            R('s1','DEV-2',{notes:{'RMM-001':'developer private note'},checklists:{},bases:{},log:[]})]};
 (async()=>{
 await new Promise(r=>srv.listen(8896,r));
-const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
+const b=await chromium.launch(fs.existsSync('/opt/pw-browsers/chromium')?{executablePath:'/opt/pw-browsers/chromium'}:{});
 const ctx=await b.newContext({viewport:{width:1320,height:1050}});
 await ctx.route('**fonts.g**',r=>r.abort());
 await ctx.route('**/supabase.js',r=>r.fulfill({status:200,contentType:'text/javascript',body:MOCK}));

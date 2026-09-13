@@ -18,7 +18,7 @@ const seed={
  meta:[R('s1','brand',{agency:'GrowwithMH',client:'RMM Builders Ltd',accent:'#12615E'})]};
 (async()=>{
 await new Promise(r=>srv.listen(8894,r));
-const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
+const b=await chromium.launch(fs.existsSync('/opt/pw-browsers/chromium')?{executablePath:'/opt/pw-browsers/chromium'}:{});
 const ctx=await b.newContext({viewport:{width:1320,height:1050}});
 await ctx.route('**fonts.g**',r=>r.abort());
 await ctx.route('**/supabase.js',r=>r.fulfill({status:200,contentType:'text/javascript',body:MOCK}));
