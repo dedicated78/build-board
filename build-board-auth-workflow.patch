@@ -1,0 +1,3310 @@
+From 026aae9643e3ae356640ae1077d203902bcf33f2 Mon Sep 17 00:00:00 2001
+From: Mehedi <growwithmh@gmail.com>
+Date: Sun, 13 Sep 2026 07:45:37 +0000
+Subject: [PATCH 1/2] Redesign Build Board UI with GrowwithMH cream theme
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The app was never dark — it carried a prefers-color-scheme block, so any
+phone in dark mode rendered the whole product dark. A cream brand identity
+means committing to one look, so both dark blocks are gone and the root is
+pinned to color-scheme: light.
+
+Design system
+- One token set: cream surfaces, GrowwithMH navy ink, warm borders, a
+  radius and shadow scale, and semantic state colours.
+- The brand aqua (#2BAFA6) only reaches 2.7:1 on white, so it carries
+  decoration — progress, swatches, rails — while --accent (#0F6F69) is the
+  AA-safe teal used for anything readable or filled. Muted ink is never
+  lighter than 4.7:1 on cream.
+
+Layout
+- Header: compact sticky bar, navy identity, tabs that read as selected by
+  weight and underline as well as colour.
+- The floating bottom account pill is gone. Account controls sit inline in
+  the header on desktop and inside a sheet under the avatar on mobile,
+  which is also where My work now lives on small screens.
+- Inventory compacted to a headline plus a two-up breakdown.
+- Filters read as filters; the mobile status rail is a segmented control
+  whose four stages fit a 360px screen.
+- Empty states say what belongs in the stage rather than that it is empty.
+- FAB clears the safe area and the toast no longer shares its lane.
+- Authentication gets the brand lockup and the same cream system.
+
+No change to Supabase behaviour, auth, tenancy, RLS, invitations, realtime,
+task logic, report calculations or the schema.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019E2117vinDTKgNRTjE5rjj
+---
+ build.py          | 132 ++++++++---
+ public/access.js  |  50 +++--
+ public/index.html | 549 ++++++++++++++++++++++++++++------------------
+ src/board.html    | 417 ++++++++++++++++++++---------------
+ 4 files changed, 710 insertions(+), 438 deletions(-)
+
+diff --git a/build.py b/build.py
+index 6afbdcf..8281808 100644
+--- a/build.py
++++ b/build.py
+@@ -14,7 +14,7 @@ d = SRC.read_text(encoding="utf-8")
+ head = """<style>
+   /* base reset the artifact runtime used to inject — the app depends on it */
+   html{color-scheme:light}
+-  body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#F2F4F5;color:#14181B}
++  body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#F7F3EA;color:#010B24}
+   img{max-width:100%}
+   [hidden]{display:none!important}
+   *,*::before,*::after{box-sizing:border-box}
+@@ -24,42 +24,80 @@ head = """<style>
+ <script src="sb-adapter.js"></script>
+ <script src="access.js"></script>
+ <style>
+-  #gate{position:fixed;inset:0;z-index:9999;background:#F2F4F5;display:flex;align-items:center;justify-content:center;padding:24px}
+-  #gate .gcard{background:#fff;border:1px solid #D6DCDF;border-radius:12px;padding:28px;width:100%;max-width:360px;
+-    box-shadow:0 1px 2px rgba(20,24,27,.06),0 6px 18px rgba(20,24,27,.05);font-family:"IBM Plex Sans",system-ui,sans-serif}
+-  #gate h1{font-family:"Archivo",system-ui,sans-serif;font-size:19px;margin:0 0 4px;color:#14181B}
+-  #gate p{margin:0 0 20px;font-size:13px;color:#5A6469;line-height:1.5}
+-  #gate label{display:block;font-size:12px;font-weight:600;color:#5A6469;margin:0 0 5px}
+-  #gate input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #D6DCDF;border-radius:8px;
+-    font:14px/1.4 "IBM Plex Sans",system-ui,sans-serif;margin:0 0 14px;background:#fff;color:#14181B}
+-  #gate input:focus{outline:none;border-color:#12615E;box-shadow:0 0 0 3px #DCEBEA}
+-  #gate button{width:100%;padding:11px;border:0;border-radius:8px;background:#12615E;color:#fff;font-weight:600;
+-    font-size:14px;cursor:pointer;font-family:"IBM Plex Sans",system-ui,sans-serif}
++  /* the app's tokens, repeated here because this shell renders before it */
++  #gate, #whoami, .acct { --cream:#F7F3EA; --paper:#FFFDF8; --navy:#010B24; --navy-2:#56606F;
++    --muted:#646D7E; --line:#E5DED2; --teal:#0F6F69; --teal-hover:#218F88; --teal-soft:#E3F3F1; --red:#A83229; }
++
++  /* ---- authentication ---- */
++  #gate{position:fixed;inset:0;z-index:9999;background:var(--cream);display:flex;align-items:center;
++    justify-content:center;padding:24px 20px;overflow-y:auto}
++  #gate .gwrap{width:100%;max-width:392px;margin:auto}
++  #gate .glock{text-align:center;margin:0 0 22px}
++  #gate .glock .eb{font-family:"Archivo",system-ui,sans-serif;font-size:10.5px;font-weight:700;
++    letter-spacing:.15em;text-transform:uppercase;color:var(--navy-2)}
++  #gate .glock .nm{font-family:"Archivo",system-ui,sans-serif;font-size:27px;font-weight:700;
++    letter-spacing:-.02em;color:var(--navy);line-height:1.15;margin-top:3px}
++  #gate .glock .sb{font-size:13px;color:var(--muted);margin-top:5px}
++  #gate .gcard{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:26px 24px;
++    box-shadow:0 1px 2px rgba(1,11,36,.05),0 18px 48px rgba(1,11,36,.10);
++    font-family:"IBM Plex Sans",system-ui,sans-serif}
++  #gate h1{font-family:"Archivo",system-ui,sans-serif;font-size:18px;margin:0 0 4px;color:var(--navy)}
++  #gate p{margin:0 0 20px;font-size:13px;color:var(--navy-2);line-height:1.55}
++  #gate label{display:block;font-family:"Archivo",system-ui,sans-serif;font-size:10.5px;font-weight:600;
++    letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
++  #gate input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid var(--line);border-radius:10px;
++    font:16px/1.4 "IBM Plex Sans",system-ui,sans-serif;margin:0 0 15px;background:#fff;color:var(--navy);min-height:46px}
++  #gate input:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-soft)}
++  #gate button{width:100%;padding:12px;border:0;border-radius:10px;background:var(--teal);color:#fff;font-weight:600;
++    font-size:15px;cursor:pointer;font-family:"Archivo",system-ui,sans-serif;min-height:48px}
++  #gate button:hover{background:var(--teal-hover)}
+   #gate button:disabled{opacity:.6;cursor:default}
+-  #gate .err{font-size:12.5px;color:#B5342B;margin:12px 0 0;line-height:1.5;display:none}
++  #gate button:focus-visible,#gate input:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
++  #gate .err{font-size:12.5px;color:var(--red);margin:12px 0 0;line-height:1.5;display:none}
+   #gate .err.on{display:block}
+-  #whoami{position:fixed;left:12px;bottom:12px;z-index:600;display:none;align-items:center;gap:8px;background:#fff;
+-    border:1px solid #D6DCDF;border-radius:999px;padding:5px 6px 5px 12px;font:12px "IBM Plex Sans",system-ui,sans-serif;
+-    color:#5A6469;box-shadow:0 1px 2px rgba(20,24,27,.06),0 6px 18px rgba(20,24,27,.05)}
+-  #whoami select{border:0;background:transparent;font:600 12px "IBM Plex Sans",system-ui,sans-serif;color:#14181B;
+-    max-width:150px;cursor:pointer}
++  #gate .gfoot{text-align:center;font-size:11.5px;color:var(--muted);margin:16px 0 0}
++
++  /* ---- account: inline in the header on desktop, inside .acct on mobile ---- */
++  #whoami{display:none;align-items:center;gap:8px;font:12px "IBM Plex Sans",system-ui,sans-serif;color:var(--navy-2)}
++  #whoami .site{display:inline-flex;align-items:center;background:var(--paper);border:1px solid var(--line);
++    border-radius:8px;padding:0 4px 0 10px;min-height:34px;max-width:200px}
++  #whoami select{border:0;background:transparent;font:600 12.5px "IBM Plex Sans",system-ui,sans-serif;
++    color:var(--navy);max-width:170px;cursor:pointer;min-height:32px}
+   #whoami select:focus{outline:none}
+-  #whoami button{border:0;background:#E9ECEE;color:#5A6469;border-radius:999px;padding:5px 11px;font-size:12px;
+-    font-weight:600;cursor:pointer;font-family:inherit}
+-  body.authed{padding-bottom:56px}
+-  #whoami .people{background:#DCEBEA;color:#0F4F4C}
+-  #whoami .role{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:#8A9399;font-weight:700}
++  #whoami button{border:1px solid var(--line);background:var(--paper);color:var(--navy-2);border-radius:8px;
++    padding:0 12px;min-height:34px;font-size:12.5px;font-weight:600;cursor:pointer;
++    font-family:"Archivo",system-ui,sans-serif}
++  #whoami button:hover{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
++  #whoami .people{background:var(--teal-soft);border-color:transparent;color:#0B4F4A}
++  #whoami .role{font-family:"Archivo",system-ui,sans-serif;font-size:10px;letter-spacing:.1em;
++    text-transform:uppercase;color:var(--muted);font-weight:700;background:var(--cream);
++    border:1px solid var(--line);border-radius:99px;padding:3px 9px}
+   /* A viewer can read the board and the report, nothing else. The database
+      refuses their writes regardless — this just stops them being offered. */
+   body.role-viewer #addBtn, body.role-viewer #fabAdd, body.role-viewer [data-add="1"],
+   body.role-viewer #dSave, body.role-viewer #dDelete, body.role-viewer #dApprove,
+   body.role-viewer #importPlan, body.role-viewer #editInv, body.role-viewer #addPerson,
+   body.role-viewer #addMeeting, body.role-viewer #xAdd{display:none!important}
+-  @media (max-width:760px){ #whoami{left:10px;bottom:10px;padding:4px 5px 4px 10px} #whoami select{max-width:96px} }
++
++  @media (max-width:1180px) and (min-width:701px){ #whoami .role{display:none} }
++  @media (max-width:700px){
++    /* inside the avatar sheet: full-width rows, nothing floating over content */
++    #whoami{flex-direction:column;align-items:stretch;gap:6px;width:100%}
++    #whoami .site,#whoami select{max-width:none;width:100%}
++    #whoami .site{min-height:42px}
++    #whoami button{min-height:42px;text-align:left}
++    #whoami .role{display:none}   /* the sheet header already states the role */
++  }
+ </style>
+-<div id="gate" hidden><div class="gcard">
+-  <h1>RMM Build Board</h1>
+-  <p>Sign in with the account your admin created for you.</p>
++<div id="gate" hidden><div class="gwrap">
++  <div class="glock">
++    <div class="eb">RMM Builders Ltd</div>
++    <div class="nm">Build Board</div>
++    <div class="sb">Secure project workspace</div>
++  </div>
++  <div class="gcard">
++  <h1>Sign in</h1>
++  <p>Use the account your admin created for you.</p>
+   <form id="gateForm">
+     <label for="gEmail">Email</label>
+     <input id="gEmail" type="email" autocomplete="username" required>
+@@ -68,8 +106,9 @@ head = """<style>
+     <button type="submit" id="gBtn">Sign in</button>
+     <p class="err" id="gErr"></p>
+   </form>
++  </div>
++  <p class="gfoot">Access is by invitation only.</p>
+ </div></div>
+-<div id="whoami"></div>
+ """
+ app = d.index("<script>\n")
+ d = d[:app] + head + d[app:]
+@@ -94,20 +133,43 @@ boot = """
+ /* ================= sign-in gate ================= */
+ (function () {
+   var gate = document.getElementById("gate");
+-  var bar  = document.getElementById("whoami");
++  // the account controls live in the header cluster: inline on desktop, and
++  // inside the avatar sheet on mobile. Never floating over the content.
++  var slot = document.getElementById("acctSlot");
++  var bar  = document.createElement("div");
++  bar.id = "whoami";
++  if (slot) slot.appendChild(bar); else document.body.appendChild(bar);
+   if (!PB.client()) { gate.parentNode.removeChild(gate); return; }  // unconfigured: local mode
+ 
++  function esc(s) { return String(s == null ? "" : s).replace(/[<>&"]/g, ""); }
++
+   function chrome() {
+     var cur = PB.siteId(), list = PB.sites();
++    var siteName = esc((PB.siteRecord() || {}).name || "");
+     var opts = list.map(function (s) {
+       return '<option value="' + s.id + '"' + (s.id === cur ? " selected" : "") + ">" +
+-             String(s.name || s.id).replace(/[<>&]/g, "") + "</option>";
++             esc(s.name || s.id) + "</option>";
+     }).join("");
+-    bar.innerHTML = (list.length > 1 ? '<select id="siteSel">' + opts + "</select>"
+-                                     : "<span>" + String((PB.siteRecord() || {}).name || "") + "</span>") +
+-                    '<span class="role">' + String(PB.role() || "") + "</span>" +
+-                    (PB.isAdmin() ? '<button type="button" class="people" id="people">People</button>' : "") +
+-                    '<button type="button" id="signOut" title="' + String(PB.name() || "") + '">Sign out</button>';
++
++    // who you are, stated once, at the top of the mobile sheet
++    var idBlock = document.getElementById("acctWho");
++    if (!idBlock) {
++      idBlock = document.createElement("div");
++      idBlock.id = "acctWho"; idBlock.className = "acct-id";
++      var host = document.getElementById("acct");
++      if (host) host.insertBefore(idBlock, host.firstChild);
++    }
++    var role = esc(PB.role() || "");
++    idBlock.innerHTML = '<span class="nm">' + esc(PB.name() || "Signed in") + "</span>" +
++                        '<span class="mt">' + (role ? role.charAt(0).toUpperCase() + role.slice(1) : "") +
++                        (siteName ? " &middot; " + siteName : "") + "</span>";
++
++    bar.innerHTML = (list.length > 1
++                      ? '<span class="site"><select id="siteSel" aria-label="Project">' + opts + "</select></span>"
++                      : '<span class="site"><span>' + siteName + "</span></span>") +
++                    '<span class="role">' + esc(PB.role() || "") + "</span>" +
++                    (PB.isAdmin() ? '<button type="button" class="people" id="people">Manage people</button>' : "") +
++                    '<button type="button" id="signOut" title="' + esc(PB.name() || "") + '">Sign out</button>';
+     bar.style.display = "flex";
+     var sel = document.getElementById("siteSel");
+     if (sel) sel.onchange = function () { PB.useSite(this.value); };
+diff --git a/public/access.js b/public/access.js
+index 07aedfd..3ee5c37 100644
+--- a/public/access.js
++++ b/public/access.js
+@@ -14,39 +14,44 @@
+ 
+   var css = document.createElement("style");
+   css.textContent = [
+-    "#acc{position:fixed;inset:0;z-index:9800;background:rgba(20,24,27,.34);display:flex;align-items:center;",
++    "#acc{position:fixed;inset:0;z-index:9800;background:rgba(1,11,36,.38);display:flex;align-items:center;",
+       "justify-content:center;padding:20px;font-family:'IBM Plex Sans',system-ui,sans-serif}",
+-    "#acc .ac-sheet{background:#fff;border:1px solid #D6DCDF;border-radius:14px;width:100%;max-width:640px;",
+-      "max-height:86vh;overflow:auto;box-shadow:0 18px 50px rgba(20,24,27,.18)}",
++    "#acc .ac-sheet{background:#FFFDF8;border:1px solid #E5DED2;border-radius:16px;width:100%;max-width:640px;",
++      "max-height:86vh;overflow:auto;box-shadow:0 18px 48px rgba(1,11,36,.16)}",
+     "#acc .ac-hd{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;",
+-      "border-bottom:1px solid #E6EAEC;position:sticky;top:0;background:#fff;border-radius:14px 14px 0 0}",
+-    "#acc h2{font-family:Archivo,system-ui,sans-serif;font-size:17px;margin:0;color:#14181B}",
+-    "#acc .ac-x{border:0;background:#E9ECEE;color:#5A6469;border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:15px}",
+-    "#acc .ac-sec{padding:18px 22px;border-bottom:1px solid #E6EAEC}",
++      "border-bottom:1px solid #F0EAE0;position:sticky;top:0;background:#FFFDF8;border-radius:16px 16px 0 0}",
++    "#acc h2{font-family:Archivo,system-ui,sans-serif;font-size:17px;margin:0;color:#010B24}",
++    "#acc .ac-x{border:0;background:#F1EBE0;color:#56606F;border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:15px}",
++    "#acc .ac-sec{padding:18px 22px;border-bottom:1px solid #F0EAE0}",
+     "#acc .ac-sec:last-child{border-bottom:0}",
+-    "#acc h3{font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:#8A9399;margin:0 0 12px;font-weight:700}",
+-    "#acc .ac-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #F0F3F4}",
++    "#acc h3{font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:#646D7E;margin:0 0 12px;font-weight:700}",
++    "#acc .ac-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #F0EAE0}",
+     "#acc .ac-row:last-child{border-bottom:0}",
+     "#acc .ac-who{flex:1 1 auto;min-width:0}",
+-    "#acc .ac-nm{font-weight:600;font-size:13.5px;color:#14181B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+-    "#acc .ac-sub{font-size:12px;color:#8A9399;font-family:'IBM Plex Mono',monospace}",
+-    "#acc select,#acc input{border:1px solid #D6DCDF;border-radius:8px;padding:7px 9px;font:13px 'IBM Plex Sans',system-ui,sans-serif;background:#fff;color:#14181B}",
+-    "#acc select:focus,#acc input:focus{outline:none;border-color:#12615E;box-shadow:0 0 0 3px #DCEBEA}",
+-    "#acc .ac-mini{border:0;background:transparent;color:#B5342B;font-size:12px;font-weight:600;cursor:pointer;padding:6px}",
+-    "#acc .ac-link{border:0;background:#E9ECEE;color:#14181B;border-radius:8px;padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer}",
++    "#acc .ac-nm{font-weight:600;font-size:13.5px;color:#010B24;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
++    "#acc .ac-sub{font-size:12px;color:#646D7E;font-family:'IBM Plex Mono',monospace}",
++    "#acc select,#acc input{border:1px solid #E5DED2;border-radius:8px;padding:8px 10px;font:13px 'IBM Plex Sans',system-ui,sans-serif;background:#fff;color:#010B24;min-height:38px}",
++    "#acc select:focus,#acc input:focus{outline:none;border-color:#0F6F69;box-shadow:0 0 0 3px #E3F3F1}",
++    "#acc .ac-mini{border:1px solid #F3D9D5;background:#FBEEEC;color:#A83229;font-size:12px;font-weight:600;cursor:pointer;padding:7px 11px;border-radius:8px;min-height:36px}",
++    "#acc .ac-link{border:1px solid #E5DED2;background:#FFFDF8;color:#010B24;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600;cursor:pointer;min-height:36px}",
+     "#acc form{display:grid;grid-template-columns:1fr 1fr;gap:10px}",
+     "#acc form .full{grid-column:1/-1}",
+-    "#acc label{display:block;font-size:11.5px;font-weight:600;color:#5A6469;margin:0 0 4px}",
++    "#acc label{display:block;font-size:11.5px;font-weight:600;color:#56606F;margin:0 0 4px}",
+     "#acc form input,#acc form select{width:100%;box-sizing:border-box}",
+     // a member row is name | role | remove — the select must not eat the row
+     "#acc .ac-row select{flex:0 0 auto;width:auto;min-width:116px}",
+     "#acc .ac-row .ac-mini{flex:0 0 auto;white-space:nowrap}",
+-    "#acc .ac-go{grid-column:1/-1;border:0;background:#12615E;color:#fff;border-radius:8px;padding:10px;font-weight:600;font-size:13.5px;cursor:pointer;font-family:inherit}",
+-    "#acc .ac-note{font-size:12px;color:#5A6469;line-height:1.5;margin:10px 0 0}",
+-    "#acc .ac-note.ac-bad{color:#B5342B}",
+-    "#acc .ac-made{background:#DCEBEA;border:1px solid #12615E33;border-radius:10px;padding:12px;margin-top:12px}",
+-    "#acc .ac-made code{display:block;font:12px 'IBM Plex Mono',monospace;word-break:break-all;color:#14181B;margin:6px 0 10px}",
+-    "#acc .ac-empty{font-size:12.5px;color:#8A9399;padding:6px 0}",
++    "#acc .ac-go{grid-column:1/-1;border:0;background:#0F6F69;color:#fff;border-radius:10px;padding:12px;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;min-height:46px}",
++    "#acc .ac-note{font-size:12px;color:#56606F;line-height:1.5;margin:10px 0 0}",
++    "#acc .ac-note.ac-bad{color:#A83229}",
++    "#acc .ac-made{background:#E3F3F1;border:1px solid #0F6F6933;border-radius:12px;padding:13px;margin-top:12px;font-size:13px;color:#010B24}",
++    "#acc .ac-made code{display:block;font:12px 'IBM Plex Mono',monospace;word-break:break-all;color:#010B24;margin:7px 0 10px}",
++    "#acc .ac-empty{font-size:12.5px;color:#646D7E;padding:6px 0}",
++    "#acc .ac-badge{flex:none;font-family:Archivo,system-ui,sans-serif;font-size:10px;font-weight:700;",
++    "  letter-spacing:.09em;text-transform:uppercase;border-radius:99px;padding:4px 9px;",
++    "  background:#F7EBD5;color:#8A5A08;border:1px solid #EEDCBB}",
++    "#acc .ac-go:focus-visible,#acc .ac-link:focus-visible,#acc .ac-mini:focus-visible,",
++    "#acc .ac-x:focus-visible{outline:2px solid #0F6F69;outline-offset:2px}",
+     "#acc .ac-row .ac-note{flex:1 0 100%;margin:6px 0 0}",
+     // narrow: name on its own line, controls beneath, nothing clipped
+     "@media (max-width:560px){",
+@@ -162,6 +167,7 @@
+       " · expires " + new Date(i.expires).toISOString().slice(0, 10)));
+     row.appendChild(who);
+ 
++    row.appendChild(el("span", "ac-badge", "Pending"));
+     var copy = el("button", "ac-link", "Copy link"); copy.type = "button";
+     copy.onclick = function () {
+       var link = PB.inviteLink(i.token);
+diff --git a/public/index.html b/public/index.html
+index ead4f84..8de416e 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -14,92 +14,63 @@
+ <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"></noscript>
+ <style>
+   :root {
+-    --bg: #F2F4F5;
+-    --surface: #FFFFFF;
+-    --surface-2: #E9ECEE;
+-    --sunk: #E3E7E9;
+-    --line: #D6DCDF;
+-    --line-soft: #E6EAEC;
+-    --ink: #14181B;
+-    --ink-2: #5A6469;
+-    --ink-3: #8A9399;
+-    --accent: #12615E;
+-    --accent-soft: #DCEBEA;
++    color-scheme: light;
++
++    /* ---- surfaces: warm cream is the dominant ground ---- */
++    --bg: #F7F3EA;            /* --bg-main   */
++    --bg-soft: #FBF8F2;
++    --surface: #FFFDF8;       /* cards, panels */
++    --surface-elevated: #FFFFFF;   /* report paper, menus — reads as lifted off the cream */
++    --surface-2: #F1EBE0;     /* subtle fills, hovers */
++    --sunk: #EAE3D6;          /* progress tracks */
++
++    /* ---- ink: GrowwithMH navy ---- */
++    --ink: #010B24;           /* --text-primary   */
++    --ink-2: #56606F;         /* --text-secondary — 5.8:1 on cream */
++    --ink-3: #646D7E;         /* --text-muted     — 4.7:1 on cream, never lighter */
++
++    /* ---- lines ---- */
++    --line: #E5DED2;          /* --border        */
++    --line-strong: #D5CBB9;
++    --line-soft: #F0EAE0;
++
++    /* ---- accent ----
++       The brand aqua (#2BAFA6) only reaches 2.7:1 on white, so it carries
++       decoration — progress, swatches, rails — and never text or a filled
++       control. --accent is the AA-safe teal used for anything readable. */
++    --accent: #0F6F69;        /* 6.0:1 with white ink, 5.6:1 as text on cream */
++    --accent-bright: #2BAFA6;
++    --accent-hover: #218F88;
++    --accent-soft: #E3F3F1;
+     --accent-ink: #FFFFFF;
+-    --good: #2C7A4B;
+-    --good-soft: #DDEEE4;
+-    --warn: #9A6407;
+-    --warn-soft: #F5E9D2;
+-    --bad: #B5342B;
+-    --bad-soft: #F7DEDC;
+-    --shadow: 0 1px 2px rgba(20,24,27,.06), 0 6px 18px rgba(20,24,27,.05);
+-    --radius: 10px;
++
++    /* ---- states ---- */
++    --good: #1F7A4C;  --good-soft: #DFF0E5;
++    --warn: #8A5A08;  --warn-soft: #F7EBD5;
++    --bad:  #A83229;  --bad-soft:  #F8E2DF;
++    --info: #1B4FA6;  --info-soft: #E4EDF9;
++
++    /* ---- shape + depth ---- */
++    --radius-sm: 8px;
++    --radius-md: 12px;
++    --radius-lg: 16px;
++    --radius: var(--radius-md);
++    --shadow-sm: 0 1px 2px rgba(1,11,36,.05);
++    --shadow-md: 0 1px 2px rgba(1,11,36,.05), 0 8px 24px rgba(1,11,36,.06);
++    --shadow-lg: 0 18px 48px rgba(1,11,36,.14);
++    --shadow: var(--shadow-sm);
++
+     --f-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+     --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+     --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+-    /* pipeline ramp — one hue, light to dark (ordinal stages, validated) */
+-    --st-1: #DCEBEA;
+-    --st-2: #7AB6AF;
+-    --st-3: #34827A;
+-    --st-4: #0C4B47;
+-    --tag-bg: hsl(var(--ws-h, 185) 26% 92%);
+-    --tag-fg: hsl(var(--ws-h, 185) 42% 28%);
+-  }
+-  @media (prefers-color-scheme: dark) {
+-    :root:not([data-theme="light"]) {
+-      --bg: #101314;
+-      --surface: #181C1E;
+-      --surface-2: #21262A;
+-      --sunk: #14181A;
+-      --line: #2C3236;
+-      --line-soft: #232a2d;
+-      --ink: #E8ECEE;
+-      --ink-2: #9AA5AB;
+-      --ink-3: #737E84;
+-      --accent: #4FB3A9;
+-      --accent-soft: #17332F;
+-      --accent-ink: #06201F;
+-      --good: #63BC87;
+-      --good-soft: #16301F;
+-      --warn: #D4A03A;
+-      --warn-soft: #32270F;
+-      --bad: #E58279;
+-      --bad-soft: #351A18;
+-      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.28);
+-      --st-1: #26433F;
+-      --st-2: #47837C;
+-      --st-3: #74BEB2;
+-      --st-4: #D6F2EA;
+-      --tag-bg: hsl(var(--ws-h, 185) 22% 18%);
+-      --tag-fg: hsl(var(--ws-h, 185) 45% 72%);
+-    }
+-  }
+-  :root[data-theme="dark"] {
+-    --bg: #101314;
+-    --surface: #181C1E;
+-    --surface-2: #21262A;
+-    --sunk: #14181A;
+-    --line: #2C3236;
+-    --line-soft: #232a2d;
+-    --ink: #E8ECEE;
+-    --ink-2: #9AA5AB;
+-    --ink-3: #737E84;
+-    --accent: #4FB3A9;
+-    --accent-soft: #17332F;
+-    --accent-ink: #06201F;
+-    --good: #63BC87;
+-    --good-soft: #16301F;
+-    --warn: #D4A03A;
+-    --warn-soft: #32270F;
+-    --bad: #E58279;
+-    --bad-soft: #351A18;
+-    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.28);
+-    --st-1: #26433F;
+-    --st-2: #47837C;
+-    --st-3: #74BEB2;
+-    --st-4: #D6F2EA;
+-    --tag-bg: hsl(var(--ws-h, 185) 22% 18%);
+-    --tag-fg: hsl(var(--ws-h, 185) 45% 72%);
++
++    /* pipeline ramp — one hue, light to dark (ordinal stages) */
++    --st-1: #DCEFEC;
++    --st-2: #7FCFC7;
++    --st-3: #2BAFA6;
++    --st-4: #0F6F69;
++    --tag-bg: hsl(var(--ws-h, 185) 32% 93%);
++    --tag-fg: hsl(var(--ws-h, 185) 46% 26%);
+   }
+ 
+   * { box-sizing: border-box; }
+@@ -111,7 +82,7 @@
+     line-height: 1.5;
+     -webkit-font-smoothing: antialiased;
+   }
+-  .wrap { max-width: 1240px; margin: 0 auto; padding: 28px 20px 72px; display: flex; flex-direction: column; gap: 26px; }
++  .wrap { max-width: 1320px; margin: 0 auto; padding: 22px 24px 96px; display: flex; flex-direction: column; gap: 22px; }
+   h1, h2, h3, h4 { font-family: var(--f-display); margin: 0; text-wrap: balance; }
+   button { font: inherit; cursor: pointer; }
+   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+@@ -123,42 +94,53 @@
+   .spacer { flex: 1 1 auto; }
+ 
+   /* ---------- masthead + tabs ---------- */
+-  header.top { display: flex; flex-direction: column; gap: 4px; }
+-  header.top h1 { font-size: 30px; font-weight: 700; letter-spacing: -.02em; }
+-  header.top p { margin: 2px 0 0; color: var(--ink-2); max-width: 62ch; }
+-  .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+-  .conn { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-2); }
++  header.top {
++    display: flex; flex-direction: column; gap: 2px;
++    position: sticky; top: 0; z-index: 25; background: var(--bg);
++    margin: -22px -24px 0; padding: 16px 24px 0; border-bottom: 1px solid var(--line);
++  }
++  header.top h1 { font-size: 25px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; }
++  header.top p { margin: 3px 0 0; color: var(--ink-2); max-width: 62ch; font-size: 13.5px; }
++  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
++  .brandblock { min-width: 0; }
++  .conn { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); flex: none; }
+   .dot.off { background: var(--warn); }
+-  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-top: 14px; }
++  .tabs { display: flex; gap: 4px; margin-top: 10px; }
+   .tabs button {
+     border: 0; background: transparent; color: var(--ink-2); font-family: var(--f-display);
+-    font-size: 14px; font-weight: 600; padding: 9px 15px; border-bottom: 2px solid transparent; margin-bottom: -1px;
++    font-size: 14px; font-weight: 600; padding: 9px 14px 10px; border-radius: var(--radius-sm) var(--radius-sm) 0 0;
++    border-bottom: 2px solid transparent; margin-bottom: -1px;
++  }
++  .tabs button:hover { color: var(--ink); background: var(--surface-2); }
++  /* selected state carries weight and an underline, never colour alone */
++  .tabs button[aria-selected="true"] {
++    color: var(--accent); border-bottom-color: var(--accent);
++    background: var(--accent-soft); font-weight: 700;
+   }
+-  .tabs button:hover { color: var(--ink); }
+-  .tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+ 
+   /* ---------- progress rail ---------- */
+   .rail {
+     background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+-    padding: 20px 22px; display: grid; grid-template-columns: minmax(200px, 260px) 1fr; gap: 28px;
++    padding: 16px 18px; display: grid; grid-template-columns: minmax(180px, 236px) 1fr; gap: 22px;
++    box-shadow: var(--shadow-sm);
+   }
+-  .rail-total { display: flex; flex-direction: column; gap: 6px; border-right: 1px solid var(--line-soft); padding-right: 26px; }
+-  .big { font-family: var(--f-display); font-size: 42px; font-weight: 700; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; }
++  .rail-total { display: flex; flex-direction: column; gap: 5px; border-right: 1px solid var(--line-soft); padding-right: 22px; }
++  .big { font-family: var(--f-display); font-size: 34px; font-weight: 700; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+   .big span { font-size: 20px; color: var(--ink-3); font-weight: 600; }
+   .total-bar { height: 8px; border-radius: 99px; background: var(--sunk); overflow: hidden; display: flex; margin-top: 6px; }
+   .total-bar i { display: block; height: 100%; }
+   .total-bar i.live { background: var(--good); }
+-  .total-bar i.prog { background: var(--accent); }
++  .total-bar i.prog { background: var(--accent-bright); }
+   .legend { display: flex; gap: 14px; font-size: 12px; color: var(--ink-2); flex-wrap: wrap; }
+   .legend b { font-weight: 500; display: inline-flex; align-items: center; gap: 5px; }
+   .swatch { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+-  .buckets { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px 24px; align-content: center; }
+-  .bkt-name { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; margin-bottom: 6px; }
+-  .bkt-name span:first-child { font-weight: 500; }
+-  .bkt-name .cnt { font-family: var(--f-mono); font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+-  .bkt-bar { height: 5px; border-radius: 99px; background: var(--sunk); overflow: hidden; display: flex; }
+-  .bkt-bar i { display: block; height: 100%; background: var(--accent); }
++  .buckets { display: grid; grid-template-columns: repeat(auto-fit, minmax(134px, 1fr)); gap: 10px 20px; align-content: center; }
++  .bkt-name { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12.5px; margin-bottom: 4px; }
++  .bkt-name span:first-child { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  .bkt-name .cnt { font-family: var(--f-mono); font-size: 11.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; flex: none; }
++  .bkt-bar { height: 4px; border-radius: 99px; background: var(--sunk); overflow: hidden; display: flex; }
++  .bkt-bar i { display: block; height: 100%; background: var(--accent-bright); }
+   .bkt-bar i.done { background: var(--good); }
+ 
+   /* ---------- workstream strip ---------- */
+@@ -174,7 +156,7 @@
+   .ws-tile .val { font-family: var(--f-mono); font-size: 17px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+   .ws-tile .val small { font-size: 11.5px; color: var(--ink-3); font-family: var(--f-body); letter-spacing: 0; }
+   .ws-tile .tr { height: 4px; border-radius: 99px; background: var(--sunk); overflow: hidden; }
+-  .ws-tile .tr i { display: block; height: 100%; background: hsl(var(--ws-h) 42% 42%); }
++  .ws-tile .tr i { display: block; height: 100%; background: hsl(var(--ws-h) 44% 38%); }
+ 
+   /* ---------- toolbar ---------- */
+   .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+@@ -185,37 +167,49 @@
+     display: inline-flex; align-items: center; gap: 6px; transition: background .12s, color .12s, border-color .12s;
+   }
+   .chip:hover { border-color: var(--ink-3); color: var(--ink); }
+-  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
++  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+   .chip .n { font-family: var(--f-mono); font-size: 11.5px; opacity: .75; }
+   .chip.alarm[aria-pressed="false"] { color: var(--bad); border-color: var(--bad-soft); background: var(--bad-soft); }
+   .btn {
+     border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+-    padding: 7px 14px; border-radius: 8px; font-weight: 600; font-size: 13.5px; font-family: var(--f-display);
+-  }
+-  .btn.ghost { background: transparent; color: var(--ink-2); border-color: var(--line); }
+-  .btn.ghost:hover { color: var(--ink); border-color: var(--ink-3); }
+-  .btn.danger { background: transparent; color: var(--bad); border-color: var(--line); }
++    padding: 8px 15px; border-radius: var(--radius-sm); font-weight: 600; font-size: 13.5px;
++    font-family: var(--f-display); min-height: 38px; transition: background .12s, border-color .12s;
++  }
++  .btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
++  .btn.ghost { background: var(--surface); color: var(--ink-2); border-color: var(--line); }
++  .btn.ghost:hover { color: var(--ink); border-color: var(--line-strong); background: var(--surface-2); }
++  .btn.danger { background: var(--surface); color: var(--bad); border-color: var(--line); }
++  .btn.danger:hover { border-color: var(--bad); background: var(--bad-soft); }
++  /* a filter, not a form field: micro label, navy value, quiet frame */
+   .who-pick {
+-    display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2);
+-    background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px 4px 12px;
++    display: inline-flex; align-items: center; gap: 9px; min-height: 38px;
++    font-family: var(--f-display); font-size: 10px; font-weight: 600;
++    letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
++    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm);
++    padding: 3px 8px 3px 12px;
++  }
++  .who-pick:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
++  .who-pick select {
++    border: 0; background: transparent; color: var(--ink); font-family: var(--f-body);
++    font-size: 13.5px; font-weight: 600; letter-spacing: 0; text-transform: none;
++    padding: 3px 2px; max-width: 190px;
+   }
+-  .who-pick select { border: 0; background: transparent; color: var(--ink); font: inherit; font-weight: 500; padding: 3px 2px; max-width: 190px; }
+ 
+   /* ---------- board ---------- */
+   .board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-items: start; }
+-  .col { background: var(--surface-2); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 10px; min-height: 120px; border: 1px solid transparent; }
++  .col { background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 10px; min-height: 120px; }
+   .col.over { border-color: var(--accent); background: var(--accent-soft); }
+   .col-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px; }
+-  .col-head h2 { font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
++  .col-head h2 { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
+   .col-head .pill { font-family: var(--f-mono); font-size: 11px; color: var(--ink-2); background: var(--surface); border: 1px solid var(--line-soft); border-radius: 99px; padding: 1px 8px; }
+   .col-list { display: flex; flex-direction: column; gap: 8px; }
+   .card {
+-    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+-    padding: 11px 12px 10px; display: flex; flex-direction: column; gap: 8px;
+-    text-align: left; width: 100%; color: inherit; box-shadow: var(--shadow);
+-    transition: transform .12s ease, border-color .12s ease;
++    background: var(--surface-elevated); border: 1px solid var(--line); border-radius: var(--radius-sm);
++    padding: 11px 12px 10px; display: flex; flex-direction: column; gap: 7px;
++    text-align: left; width: 100%; color: inherit; box-shadow: var(--shadow-sm);
++    transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
+   }
+-  .card:hover { border-color: var(--ink-3); transform: translateY(-1px); }
++  .card:hover { border-color: var(--accent); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+   .card.blocked { border-left: 3px solid var(--bad); padding-left: 10px; }
+   .card.dragging { opacity: .45; }
+   .card-top { display: flex; align-items: center; gap: 8px; }
+@@ -233,25 +227,27 @@
+   .ava.lg { width: 44px; height: 44px; font-size: 16px; }
+   .pg { font-family: var(--f-mono); font-size: 11.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+   .mini { flex: 1 1 auto; height: 4px; border-radius: 99px; background: var(--sunk); overflow: hidden; min-width: 26px; }
+-  .mini i { display: block; height: 100%; background: var(--accent); }
++  .mini i { display: block; height: 100%; background: var(--accent-bright); }
+   .flag { font-size: 11.5px; color: var(--bad); display: flex; gap: 5px; align-items: flex-start; line-height: 1.35; }
+   .due { font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); }
+   .due.late { color: var(--bad); font-weight: 500; }
+-  .empty { font-size: 12.5px; color: var(--ink-3); padding: 8px 4px 12px; }
++  .empty { font-size: 12.5px; color: var(--ink-3); padding: 10px 4px 12px; line-height: 1.5; }
++  .empty b { display: block; font-family: var(--f-display); font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 2px; }
+   .add-inline { border: 1px dashed var(--line); background: transparent; color: var(--ink-3); border-radius: 8px; padding: 8px; font-size: 12.5px; text-align: center; }
+   .add-inline:hover { color: var(--accent); border-color: var(--accent); }
+ 
+   /* ---------- panels ---------- */
+-  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; }
++  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow-sm); }
+   .panel h2 { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+   .panel .sub { font-size: 12.5px; color: var(--ink-3); margin: 0 0 14px; }
+   .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+   .head-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+   .linkbtn {
+     border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+-    font-family: var(--f-display); font-size: 12.5px; font-weight: 600; padding: 5px 11px; border-radius: 7px; flex: none;
++    font-family: var(--f-display); font-size: 12.5px; font-weight: 600; padding: 6px 12px;
++    border-radius: var(--radius-sm); flex: none; min-height: 34px;
+   }
+-  .linkbtn:hover { color: var(--accent); border-color: var(--accent); }
++  .linkbtn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+   table.team { width: 100%; border-collapse: collapse; }
+   table.team th { text-align: left; font-family: var(--f-display); font-size: 10.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); padding: 0 8px 8px 0; }
+   table.team th.num, table.team td.num { text-align: right; padding-right: 0; font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+@@ -322,8 +318,9 @@
+   .field input[type="color"] { padding: 3px; height: 38px; }
+   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+   .paper {
+-    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
++    background: var(--surface-elevated); border: 1px solid var(--line); border-radius: var(--radius);
+     padding: 34px 38px 40px; display: flex; flex-direction: column; gap: 26px;
++    box-shadow: var(--shadow-md);
+   }
+   .rep-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; border-bottom: 2px solid var(--rep-accent, var(--accent)); padding-bottom: 16px; }
+   .rep-head img { max-height: 46px; max-width: 190px; display: block; }
+@@ -335,7 +332,7 @@
+   .rep-sum { font-size: 14.5px; line-height: 1.62; color: var(--ink-2); max-width: 68ch; }
+   .rep-sum b { color: var(--ink); font-weight: 600; }
+   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 1px; background: var(--line-soft); border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
+-  .kpi { background: var(--surface); padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; }
++  .kpi { background: var(--surface-elevated); padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; }
+   .kpi .v { font-family: var(--f-display); font-size: 25px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+   .kpi .k { font-size: 11.5px; color: var(--ink-3); }
+   .charts { display: grid; grid-template-columns: 236px 1fr; gap: 30px; align-items: center; }
+@@ -370,13 +367,13 @@
+   .linkbtn.danger-txt:hover { color: var(--bad); border-color: var(--bad); }
+ 
+   /* ---------- drawers ---------- */
+-  .scrim { position: fixed; inset: 0; background: rgba(10,14,16,.45); opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 40; }
++  .scrim { position: fixed; inset: 0; background: rgba(1,11,36,.42); opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 40; }
+   .scrim.open { opacity: 1; pointer-events: auto; }
+   .drawer {
+     position: fixed; top: 0; right: 0; height: 100%; width: min(430px, 100%);
+     background: var(--surface); border-left: 1px solid var(--line); z-index: 50;
+     transform: translateX(102%); transition: transform .22s cubic-bezier(.4,0,.2,1);
+-    display: flex; flex-direction: column; box-shadow: -12px 0 40px rgba(10,14,16,.16);
++    display: flex; flex-direction: column; box-shadow: var(--shadow-lg);
+   }
+   .drawer.open { transform: none; }
+   .drawer-head { padding: 18px 20px 14px; border-bottom: 1px solid var(--line-soft); display: flex; align-items: flex-start; gap: 12px; }
+@@ -384,11 +381,11 @@
+   .drawer-foot { padding: 14px 20px; border-top: 1px solid var(--line-soft); display: flex; gap: 8px; align-items: center; }
+   .x { border: 0; background: transparent; color: var(--ink-3); font-size: 20px; line-height: 1; padding: 2px 6px; margin-left: auto; }
+   .x:hover { color: var(--ink); }
+-  .seg { display: flex; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 3px; gap: 3px; }
++  .seg { display: flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 3px; gap: 3px; }
+   .seg button { flex: 1; border: 0; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 500; padding: 6px 4px; border-radius: 5px; font-family: var(--f-display); }
+-  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
++  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 700; box-shadow: var(--shadow-sm); }
+   .toggle { display: flex; align-items: center; gap: 9px; font-size: 13.5px; color: var(--ink-2); }
+-  .logbox { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 13px 14px; display: flex; flex-direction: column; gap: 10px; }
++  .logbox { background: var(--bg-soft); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 13px 14px; display: flex; flex-direction: column; gap: 10px; }
+   .logbox h4 { font-family: var(--f-display); font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); margin: 0; }
+   .stepper { display: flex; align-items: center; gap: 8px; }
+   .stepper button { width: 30px; height: 30px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 16px; line-height: 1; }
+@@ -397,7 +394,8 @@
+ 
+   .toast {
+     position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 14px);
+-    background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 8px;
++    max-width: calc(100vw - 32px); text-align: center;
++    background: var(--ink); color: #FFFDF8; padding: 9px 16px; border-radius: 8px;
+     font-size: 13px; font-weight: 500; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 60;
+   }
+   .toast.show { opacity: 1; transform: translate(-50%, 0); }
+@@ -604,8 +602,8 @@
+   }
+   .tray {
+     position: absolute; top: 42px; right: 0; width: min(378px, calc(100vw - 32px));
+-    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+-    box-shadow: 0 12px 40px rgba(10,14,16,.18); z-index: 30; overflow: hidden;
++    background: var(--surface-elevated); border: 1px solid var(--line); border-radius: var(--radius);
++    box-shadow: var(--shadow-lg); z-index: 30; overflow: hidden;
+     display: flex; flex-direction: column; max-height: 460px;
+   }
+   .tray-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line-soft); }
+@@ -630,15 +628,17 @@
+   .nt .wh { font-family: var(--f-mono); font-size: 10.5px; color: var(--ink-3); margin-top: 3px; display: block; }
+ 
+   /* ---------- meetings ---------- */
+-  .mtg { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line-soft); text-align: left; background: transparent; border-left: 0; border-right: 0; border-bottom: 0; width: 100%; color: inherit; cursor: pointer; }
++  .mtg { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line-soft); text-align: left; background: transparent; border-left: 0; border-right: 0; border-bottom: 0; width: 100%; color: inherit; cursor: pointer; min-width: 0; }
+   .mtg:first-of-type { border-top: 0; }
+   .mtg:hover .mt-t { color: var(--accent); }
++  .mtg .mt-x { flex: 1 1 auto; min-width: 0; }
++  .mtg .mt-t, .mtg .mt-s { overflow: hidden; text-overflow: ellipsis; }
+   .mtg .cal {
+-    width: 44px; flex: none; text-align: center; background: var(--bg); border: 1px solid var(--line-soft);
+-    border-radius: 7px; padding: 4px 0 5px;
++    width: 44px; flex: none; text-align: center; background: var(--accent-soft); border: 1px solid var(--line-soft);
++    border-radius: var(--radius-sm); padding: 4px 0 5px; color: var(--accent);
+   }
+   .mtg .cal .d { display: block; font-family: var(--f-display); font-size: 16px; font-weight: 700; line-height: 1.1; }
+-  .mtg .cal .m { display: block; font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); }
++  .mtg .cal .m { display: block; font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); opacity: .8; }
+   .mtg .mt-t { display: block; font-size: 13.5px; font-weight: 600; }
+   .mtg .mt-s { display: block; font-size: 12px; color: var(--ink-3); margin-top: 1px; }
+   .mtg .soon { font-family: var(--f-mono); font-size: 11px; color: var(--warn); margin-left: auto; flex: none; }
+@@ -652,6 +652,16 @@
+   }
+   .checks label:hover { color: var(--ink); }
+ 
++  /* ---------- account menu ---------- */
++  .acct { display: flex; align-items: center; gap: 8px; }
++  .acct-item {
++    border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
++    font-family: var(--f-display); font-size: 12.5px; font-weight: 600;
++    padding: 6px 12px; border-radius: var(--radius-sm); min-height: 34px; text-align: left;
++  }
++  .acct-item:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
++  .acct-id { display: none; }
++
+   @media (max-width: 1020px) {
+     .board { grid-template-columns: repeat(2, minmax(0,1fr)); }
+     .rail { grid-template-columns: 1fr; gap: 20px; }
+@@ -662,23 +672,42 @@
+ 
+   /* ============ mobile ============ */
+   @media (max-width: 700px) {
+-    .wrap { padding: 0 0 96px; gap: 0; }
++    .wrap { padding: 0 0 calc(104px + env(safe-area-inset-bottom, 0px)); gap: 0; }
+     .m-only { display: revert; }
+ 
+     /* --- app bar: identity and navigation stay reachable at any scroll depth --- */
+     header.top {
+       position: sticky; top: 0; z-index: 25; background: var(--bg);
+-      padding: 12px 16px 0; margin: 0; gap: 0;
+-      box-shadow: 0 1px 0 var(--line);
++      padding: 10px 16px 0; margin: 0; gap: 0;
++      border-bottom: 1px solid var(--line);
+     }
+     header.top .topbar { align-items: center; gap: 10px; flex-wrap: nowrap; }
+-    header.top h1 { font-size: 19px; letter-spacing: -.01em; }
+-    header.top .eyebrow { font-size: 9.5px; margin-bottom: 1px; }
++    header.top h1 { font-size: 21px; letter-spacing: -.015em; }
++    header.top .eyebrow { font-size: 10px; margin-bottom: 2px; color: var(--ink-2); }
+     header.top p, header.top .conn { display: none; }
+-    .tabs { margin-top: 10px; border-bottom: 0; gap: 0; }
+-    .tabs button { flex: 1; padding: 11px 6px 12px; font-size: 13.5px; min-height: 44px; }
++    .tabs { margin-top: 8px; gap: 2px; }
++    .tabs button {
++      flex: 1; padding: 10px 6px 11px; font-size: 13.5px; min-height: 44px;
++      border-radius: var(--radius-sm) var(--radius-sm) 0 0;
++    }
+     .bell { width: 40px; height: 40px; }
+ 
++    /* --- account: a sheet under the avatar, replacing the old floating bar --- */
++    .acct {
++      position: absolute; top: calc(100% + 10px); right: 0; z-index: 46;
++      display: none; flex-direction: column; align-items: stretch; gap: 6px;
++      width: min(268px, calc(100vw - 32px)); padding: 10px;
++      background: var(--surface-elevated); border: 1px solid var(--line);
++      border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
++    }
++    body.acct-open .acct { display: flex; }
++    .acct-item { width: 100%; min-height: 42px; }
++    .acct-id {
++      display: block; padding: 4px 4px 8px; border-bottom: 1px solid var(--line-soft); margin-bottom: 2px;
++    }
++    .acct-id .nm { display: block; font-family: var(--f-display); font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.25; }
++    .acct-id .mt { display: block; font-size: 12px; color: var(--ink-3); margin-top: 2px; }
++
+     /* sections become full-bleed bands rather than floating cards */
+     #view-board { gap: 0 !important; }
+     .rail, .panel {
+@@ -686,13 +715,16 @@
+       padding: 16px; margin: 0;
+     }
+     .panel + .panel { border-top: 8px solid var(--bg); }
++    .panel, .rail { box-shadow: none; }
+ 
+-    /* --- inventory: headline plus a two-up breakdown, not five stacked rows --- */
+-    .rail { padding-bottom: 18px; }
+-    .rail-total { padding-bottom: 14px; }
+-    .big { font-size: 32px; }
+-    .buckets { grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+-    .bkt-name { font-size: 12px; margin-bottom: 5px; }
++    /* --- inventory: one headline, then a compact two-up breakdown --- */
++    .rail { padding: 14px 16px 16px; }
++    .rail-total { padding-bottom: 12px; gap: 4px; }
++    .big { font-size: 28px; }
++    .buckets { grid-template-columns: 1fr 1fr; gap: 9px 14px; }
++    .bkt-name { font-size: 12px; margin-bottom: 4px; }
++    .rail-head { gap: 6px; align-items: center; }
++    .rail-head .linkbtn.tiny { min-height: 30px; }
+ 
+     /* --- workstreams: one swipeable rail instead of a six-tile wall --- */
+     .ws-strip {
+@@ -715,10 +747,9 @@
+     /* a select will not shrink below its content unless min-width is cleared at every level */
+     /* stacked label over control, so every picker reads the same whatever its label length */
+     .who-pick {
+-      width: 100%; min-width: 0; overflow: hidden; min-height: 48px;
+-      flex-direction: column; align-items: stretch; gap: 0; padding: 5px 8px 6px 11px;
+-      font-family: var(--f-display); font-size: 9.5px; font-weight: 600;
+-      letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
++      width: 100%; min-width: 0; overflow: hidden; min-height: 52px;
++      flex-direction: column; align-items: stretch; gap: 0; padding: 6px 8px 7px 11px;
++      font-size: 9.5px;
+     }
+     .who-pick select { width: 100%; min-width: 0; max-width: none; font-size: 14px; padding: 1px 0 0; }
+     .who-pick.wide { grid-column: 1 / -1; }
+@@ -726,17 +757,25 @@
+     /* --- board: one status at a time, switched deliberately --- */
+     .status-switch {
+       display: flex; position: sticky; top: var(--appbar-h, 96px); z-index: 20;
+-      background: var(--bg); padding: 10px 16px; gap: 6px; overflow-x: auto;
++      background: var(--bg); padding: 10px 16px; gap: 4px; overflow-x: auto;
+       border-bottom: 1px solid var(--line); scrollbar-width: none;
+     }
+     .status-switch::-webkit-scrollbar { display: none; }
+     .status-switch button {
+-      flex: 1 0 auto; min-height: 40px; padding: 8px 12px; border-radius: 99px;
++      flex: 1 1 auto; min-width: 0; min-height: 42px; padding: 8px 9px; border-radius: 99px;
+       border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+       font-family: var(--f-display); font-size: 13px; font-weight: 600; white-space: nowrap;
+     }
+-    .status-switch button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+-    .status-switch button .n { font-family: var(--f-mono); font-size: 11px; opacity: .7; margin-left: 4px; }
++    .status-switch button[aria-pressed="true"] {
++      background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
++      font-weight: 700; box-shadow: var(--shadow-sm);
++    }
++    .status-switch button { font-size: 12.5px; }
++    .status-switch button .n {
++      font-family: var(--f-mono); font-size: 10.5px; margin-left: 4px;
++      background: rgba(1,11,36,.07); border-radius: 99px; padding: 1px 5px;
++    }
++    .status-switch button[aria-pressed="true"] .n { background: rgba(255,255,255,.22); }
+     .board { display: block; padding: 12px 16px 16px; }
+     .col { background: transparent; padding: 0; }
+     .col.m-hide { display: none; }
+@@ -747,13 +786,14 @@
+     /* --- one thumb-reachable primary action --- */
+     .fab {
+       display: grid; place-items: center; position: fixed; z-index: 24;
+-      right: 16px; bottom: calc(18px + env(safe-area-inset-bottom, 0px));
++      right: 16px; bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+       width: 56px; height: 56px; border-radius: 50%;
+       background: var(--accent); color: var(--accent-ink); border: 0;
+       font-size: 28px; line-height: 1; padding-bottom: 3px;
+-      box-shadow: 0 6px 20px rgba(10,14,16,.28);
++      box-shadow: 0 8px 24px rgba(1,11,36,.26);
+     }
+     .fab-menu { display: flex; }
++    .toast { bottom: calc(94px + env(safe-area-inset-bottom, 0px)); }
+     #repFab { padding-bottom: 0; }
+ 
+     /* --- drawers become bottom sheets: controls land under the thumb --- */
+@@ -853,8 +893,9 @@
+   }
+ 
+   @media (max-width: 380px) {
+-    .buckets { grid-template-columns: 1fr; }
+     .toolbar { grid-template-columns: 1fr; }
++    header.top h1 { font-size: 19px; }
++    .big { font-size: 26px; }
+   }
+   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+ 
+@@ -864,9 +905,10 @@
+     body { background: #fff; }
+     .wrap { max-width: none; padding: 0; gap: 0; }
+     .paper {
+-      border: 0; border-radius: 0; padding: 0; background: #fff; color: #14181B;
+-      --surface: #fff; --bg: #fff; --ink: #14181B; --ink-2: #4A5459; --ink-3: #7A8388;
+-      --line: #D6DCDF; --line-soft: #E6EAEC; --sunk: #EDF0F1;
++      border: 0; border-radius: 0; padding: 0; background: #fff; color: #010B24; box-shadow: none;
++      --surface: #fff; --surface-elevated: #fff; --bg: #fff; --surface-2: #fff;
++      --ink: #010B24; --ink-2: #414B5C; --ink-3: #646D7E;
++      --line: #D9D2C6; --line-soft: #E9E3D9; --sunk: #EDE9E1;
+     }
+     .rep-sec, .charts, .kpis { break-inside: avoid; }
+     #view-report[hidden] .paper, #view-me[hidden] .paper { display: none !important; }
+@@ -876,7 +918,7 @@
+ <div class="wrap">
+   <header class="top no-print">
+     <div class="topbar">
+-      <div>
++      <div class="brandblock">
+         <div class="eyebrow">RMM Builders Ltd &middot; Birmingham B6</div>
+         <h1>Build board</h1>
+         <p id="strap">Every planned task, who owns it, and what's holding it up. Drag a card to move it, or open one to log progress.</p>
+@@ -891,7 +933,12 @@
+           <div class="tray-head"><h3>Notifications</h3><button id="markAll">Mark all read</button></div>
+           <div class="tray-list" id="trayList"></div>
+         </div>
+-        <button class="avabtn" id="meBtn" aria-label="Your profile"></button>
++        <button class="avabtn" id="meBtn" aria-label="Your profile" aria-haspopup="menu" aria-expanded="false"></button>
++        <!-- account: inline in the header on desktop, a sheet under the avatar on mobile -->
++        <div class="acct no-print" id="acct">
++          <button class="acct-item m-only" id="acctMe" type="button">My work</button>
++          <div id="acctSlot"></div>
++        </div>
+       </div>
+     </div>
+     <nav class="tabs" role="tablist">
+@@ -1242,14 +1289,14 @@
+     <button class="btn ghost" id="iReset">Reset to 94</button>
+   </div>
+ </aside>
+-<button class="fab no-print" id="fabAdd" aria-label="New task">+</button>
++<button class="fab no-print" id="fabAdd" aria-label="New task" title="New task">+</button>
+ <div class="fab-menu no-print" id="repMenu" hidden>
+   <button data-act="ai" id="mAi">Draft commentary with Claude</button>
+   <button data-act="brand">Branding</button>
+   <button data-act="dl">Download HTML</button>
+   <button data-act="print" class="primary">Print / Save PDF</button>
+ </div>
+-<button class="fab no-print" id="repFab" aria-label="Report actions" aria-expanded="false">
++<button class="fab no-print" id="repFab" aria-label="Report actions" title="Report actions" aria-expanded="false">
+   <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"></circle><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"></circle></svg>
+ </button>
+ <div class="toast no-print" id="toast"></div>
+@@ -1257,7 +1304,7 @@
+ <style>
+   /* base reset the artifact runtime used to inject — the app depends on it */
+   html{color-scheme:light}
+-  body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#F2F4F5;color:#14181B}
++  body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#F7F3EA;color:#010B24}
+   img{max-width:100%}
+   [hidden]{display:none!important}
+   *,*::before,*::after{box-sizing:border-box}
+@@ -1267,42 +1314,80 @@
+ <script src="sb-adapter.js"></script>
+ <script src="access.js"></script>
+ <style>
+-  #gate{position:fixed;inset:0;z-index:9999;background:#F2F4F5;display:flex;align-items:center;justify-content:center;padding:24px}
+-  #gate .gcard{background:#fff;border:1px solid #D6DCDF;border-radius:12px;padding:28px;width:100%;max-width:360px;
+-    box-shadow:0 1px 2px rgba(20,24,27,.06),0 6px 18px rgba(20,24,27,.05);font-family:"IBM Plex Sans",system-ui,sans-serif}
+-  #gate h1{font-family:"Archivo",system-ui,sans-serif;font-size:19px;margin:0 0 4px;color:#14181B}
+-  #gate p{margin:0 0 20px;font-size:13px;color:#5A6469;line-height:1.5}
+-  #gate label{display:block;font-size:12px;font-weight:600;color:#5A6469;margin:0 0 5px}
+-  #gate input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #D6DCDF;border-radius:8px;
+-    font:14px/1.4 "IBM Plex Sans",system-ui,sans-serif;margin:0 0 14px;background:#fff;color:#14181B}
+-  #gate input:focus{outline:none;border-color:#12615E;box-shadow:0 0 0 3px #DCEBEA}
+-  #gate button{width:100%;padding:11px;border:0;border-radius:8px;background:#12615E;color:#fff;font-weight:600;
+-    font-size:14px;cursor:pointer;font-family:"IBM Plex Sans",system-ui,sans-serif}
++  /* the app's tokens, repeated here because this shell renders before it */
++  #gate, #whoami, .acct { --cream:#F7F3EA; --paper:#FFFDF8; --navy:#010B24; --navy-2:#56606F;
++    --muted:#646D7E; --line:#E5DED2; --teal:#0F6F69; --teal-hover:#218F88; --teal-soft:#E3F3F1; --red:#A83229; }
++
++  /* ---- authentication ---- */
++  #gate{position:fixed;inset:0;z-index:9999;background:var(--cream);display:flex;align-items:center;
++    justify-content:center;padding:24px 20px;overflow-y:auto}
++  #gate .gwrap{width:100%;max-width:392px;margin:auto}
++  #gate .glock{text-align:center;margin:0 0 22px}
++  #gate .glock .eb{font-family:"Archivo",system-ui,sans-serif;font-size:10.5px;font-weight:700;
++    letter-spacing:.15em;text-transform:uppercase;color:var(--navy-2)}
++  #gate .glock .nm{font-family:"Archivo",system-ui,sans-serif;font-size:27px;font-weight:700;
++    letter-spacing:-.02em;color:var(--navy);line-height:1.15;margin-top:3px}
++  #gate .glock .sb{font-size:13px;color:var(--muted);margin-top:5px}
++  #gate .gcard{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:26px 24px;
++    box-shadow:0 1px 2px rgba(1,11,36,.05),0 18px 48px rgba(1,11,36,.10);
++    font-family:"IBM Plex Sans",system-ui,sans-serif}
++  #gate h1{font-family:"Archivo",system-ui,sans-serif;font-size:18px;margin:0 0 4px;color:var(--navy)}
++  #gate p{margin:0 0 20px;font-size:13px;color:var(--navy-2);line-height:1.55}
++  #gate label{display:block;font-family:"Archivo",system-ui,sans-serif;font-size:10.5px;font-weight:600;
++    letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
++  #gate input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid var(--line);border-radius:10px;
++    font:16px/1.4 "IBM Plex Sans",system-ui,sans-serif;margin:0 0 15px;background:#fff;color:var(--navy);min-height:46px}
++  #gate input:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-soft)}
++  #gate button{width:100%;padding:12px;border:0;border-radius:10px;background:var(--teal);color:#fff;font-weight:600;
++    font-size:15px;cursor:pointer;font-family:"Archivo",system-ui,sans-serif;min-height:48px}
++  #gate button:hover{background:var(--teal-hover)}
+   #gate button:disabled{opacity:.6;cursor:default}
+-  #gate .err{font-size:12.5px;color:#B5342B;margin:12px 0 0;line-height:1.5;display:none}
++  #gate button:focus-visible,#gate input:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
++  #gate .err{font-size:12.5px;color:var(--red);margin:12px 0 0;line-height:1.5;display:none}
+   #gate .err.on{display:block}
+-  #whoami{position:fixed;left:12px;bottom:12px;z-index:600;display:none;align-items:center;gap:8px;background:#fff;
+-    border:1px solid #D6DCDF;border-radius:999px;padding:5px 6px 5px 12px;font:12px "IBM Plex Sans",system-ui,sans-serif;
+-    color:#5A6469;box-shadow:0 1px 2px rgba(20,24,27,.06),0 6px 18px rgba(20,24,27,.05)}
+-  #whoami select{border:0;background:transparent;font:600 12px "IBM Plex Sans",system-ui,sans-serif;color:#14181B;
+-    max-width:150px;cursor:pointer}
++  #gate .gfoot{text-align:center;font-size:11.5px;color:var(--muted);margin:16px 0 0}
++
++  /* ---- account: inline in the header on desktop, inside .acct on mobile ---- */
++  #whoami{display:none;align-items:center;gap:8px;font:12px "IBM Plex Sans",system-ui,sans-serif;color:var(--navy-2)}
++  #whoami .site{display:inline-flex;align-items:center;background:var(--paper);border:1px solid var(--line);
++    border-radius:8px;padding:0 4px 0 10px;min-height:34px;max-width:200px}
++  #whoami select{border:0;background:transparent;font:600 12.5px "IBM Plex Sans",system-ui,sans-serif;
++    color:var(--navy);max-width:170px;cursor:pointer;min-height:32px}
+   #whoami select:focus{outline:none}
+-  #whoami button{border:0;background:#E9ECEE;color:#5A6469;border-radius:999px;padding:5px 11px;font-size:12px;
+-    font-weight:600;cursor:pointer;font-family:inherit}
+-  body.authed{padding-bottom:56px}
+-  #whoami .people{background:#DCEBEA;color:#0F4F4C}
+-  #whoami .role{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:#8A9399;font-weight:700}
++  #whoami button{border:1px solid var(--line);background:var(--paper);color:var(--navy-2);border-radius:8px;
++    padding:0 12px;min-height:34px;font-size:12.5px;font-weight:600;cursor:pointer;
++    font-family:"Archivo",system-ui,sans-serif}
++  #whoami button:hover{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
++  #whoami .people{background:var(--teal-soft);border-color:transparent;color:#0B4F4A}
++  #whoami .role{font-family:"Archivo",system-ui,sans-serif;font-size:10px;letter-spacing:.1em;
++    text-transform:uppercase;color:var(--muted);font-weight:700;background:var(--cream);
++    border:1px solid var(--line);border-radius:99px;padding:3px 9px}
+   /* A viewer can read the board and the report, nothing else. The database
+      refuses their writes regardless — this just stops them being offered. */
+   body.role-viewer #addBtn, body.role-viewer #fabAdd, body.role-viewer [data-add="1"],
+   body.role-viewer #dSave, body.role-viewer #dDelete, body.role-viewer #dApprove,
+   body.role-viewer #importPlan, body.role-viewer #editInv, body.role-viewer #addPerson,
+   body.role-viewer #addMeeting, body.role-viewer #xAdd{display:none!important}
+-  @media (max-width:760px){ #whoami{left:10px;bottom:10px;padding:4px 5px 4px 10px} #whoami select{max-width:96px} }
++
++  @media (max-width:1180px) and (min-width:701px){ #whoami .role{display:none} }
++  @media (max-width:700px){
++    /* inside the avatar sheet: full-width rows, nothing floating over content */
++    #whoami{flex-direction:column;align-items:stretch;gap:6px;width:100%}
++    #whoami .site,#whoami select{max-width:none;width:100%}
++    #whoami .site{min-height:42px}
++    #whoami button{min-height:42px;text-align:left}
++    #whoami .role{display:none}   /* the sheet header already states the role */
++  }
+ </style>
+-<div id="gate" hidden><div class="gcard">
+-  <h1>RMM Build Board</h1>
+-  <p>Sign in with the account your admin created for you.</p>
++<div id="gate" hidden><div class="gwrap">
++  <div class="glock">
++    <div class="eb">RMM Builders Ltd</div>
++    <div class="nm">Build Board</div>
++    <div class="sb">Secure project workspace</div>
++  </div>
++  <div class="gcard">
++  <h1>Sign in</h1>
++  <p>Use the account your admin created for you.</p>
+   <form id="gateForm">
+     <label for="gEmail">Email</label>
+     <input id="gEmail" type="email" autocomplete="username" required>
+@@ -1311,8 +1396,9 @@
+     <button type="submit" id="gBtn">Sign in</button>
+     <p class="err" id="gErr"></p>
+   </form>
++  </div>
++  <p class="gfoot">Access is by invitation only.</p>
+ </div></div>
+-<div id="whoami"></div>
+ <script>
+ (function () {
+   "use strict";
+@@ -1828,7 +1914,7 @@
+       return !m.at || new Date(m.at) > new Date(Date.now() - 6 * 3600000);
+     });
+     if (!ms.length) {
+-      $("mtgList").innerHTML = "<div class='empty'>Nothing scheduled. Anyone invited to a meeting gets a notification as it approaches.</div>";
++      $("mtgList").innerHTML = "<div class='empty'><b>No meetings scheduled.</b>Anyone you invite is notified as the time approaches.</div>";
+       return;
+     }
+     $("mtgList").innerHTML = ms.map(function (m) {
+@@ -1931,7 +2017,12 @@
+         '"><div class="col-head"><h2>' + s.label +
+         '</h2><span class="pill">' + items.length + (n ? " &middot; " + n : "") + "</span></div>" +
+         '<div class="col-list">' +
+-        (items.length ? items.map(cardHTML).join("") : '<div class="empty">Nothing in ' + s.label.toLowerCase() + ".</div>") +
++        (items.length ? items.map(cardHTML).join("")
++          : '<div class="empty"><b>No tasks ' + s.label.toLowerCase() + " yet.</b>" +
++            (s.id === "backlog" ? "Anything planned but not started lands here."
++             : s.id === "writing" ? "Move a card here once someone starts on it."
++             : s.id === "review" ? "Submitted work waiting on a check appears here."
++             : "Approved work shows here once it is signed off.") + "</div>") +
+         (s.id === "backlog" ? '<button class="add-inline" data-add="1">+ Add a task</button>' : "") +
+         "</div></div>";
+     }).join("");
+@@ -1944,7 +2035,7 @@
+   }
+   function renderFeed() {
+     if (!state.activity.length) {
+-      $("feed").innerHTML = "<div class='empty'>No updates yet. Open a task and use “Log progress”.</div>";
++      $("feed").innerHTML = "<div class='empty'><b>No activity yet.</b>Open a task and use “Log progress” to write the first entry.</div>";
+       return;
+     }
+     $("feed").innerHTML = state.activity.map(function (e) {
+@@ -3438,7 +3529,26 @@
+     }, 700);
+   });
+ 
+-  $("meBtn").addEventListener("click", function () { setView("me"); });
++  // desktop keeps the account controls inline in the header, so the avatar goes
++  // straight to My work; on mobile it opens the account sheet instead
++  function acctMobile() { return window.matchMedia("(max-width: 700px)").matches; }
++  function setAcct(open) {
++    document.body.classList.toggle("acct-open", !!open);
++    $("meBtn").setAttribute("aria-expanded", open ? "true" : "false");
++  }
++  $("meBtn").addEventListener("click", function (e) {
++    if (!acctMobile()) { setAcct(false); setView("me"); return; }
++    e.stopPropagation();
++    setAcct(!document.body.classList.contains("acct-open"));
++  });
++  $("acctMe").addEventListener("click", function () { setAcct(false); setView("me"); });
++  document.addEventListener("click", function (e) {
++    if (!document.body.classList.contains("acct-open")) return;
++    if (e.target.closest("#acct") || e.target.closest("#meBtn")) return;
++    setAcct(false);
++  });
++  document.addEventListener("keydown", function (e) { if (e.key === "Escape") setAcct(false); });
++  window.addEventListener("resize", function () { if (!acctMobile()) setAcct(false); });
+   document.addEventListener("click", function (e) {
+     if (e.target.closest("#pfPhoto")) { $("pfFile").click(); return; }
+     if (e.target.closest("#pfClear")) {
+@@ -3836,20 +3946,43 @@
+ /* ================= sign-in gate ================= */
+ (function () {
+   var gate = document.getElementById("gate");
+-  var bar  = document.getElementById("whoami");
++  // the account controls live in the header cluster: inline on desktop, and
++  // inside the avatar sheet on mobile. Never floating over the content.
++  var slot = document.getElementById("acctSlot");
++  var bar  = document.createElement("div");
++  bar.id = "whoami";
++  if (slot) slot.appendChild(bar); else document.body.appendChild(bar);
+   if (!PB.client()) { gate.parentNode.removeChild(gate); return; }  // unconfigured: local mode
+ 
++  function esc(s) { return String(s == null ? "" : s).replace(/[<>&"]/g, ""); }
++
+   function chrome() {
+     var cur = PB.siteId(), list = PB.sites();
++    var siteName = esc((PB.siteRecord() || {}).name || "");
+     var opts = list.map(function (s) {
+       return '<option value="' + s.id + '"' + (s.id === cur ? " selected" : "") + ">" +
+-             String(s.name || s.id).replace(/[<>&]/g, "") + "</option>";
++             esc(s.name || s.id) + "</option>";
+     }).join("");
+-    bar.innerHTML = (list.length > 1 ? '<select id="siteSel">' + opts + "</select>"
+-                                     : "<span>" + String((PB.siteRecord() || {}).name || "") + "</span>") +
+-                    '<span class="role">' + String(PB.role() || "") + "</span>" +
+-                    (PB.isAdmin() ? '<button type="button" class="people" id="people">People</button>' : "") +
+-                    '<button type="button" id="signOut" title="' + String(PB.name() || "") + '">Sign out</button>';
++
++    // who you are, stated once, at the top of the mobile sheet
++    var idBlock = document.getElementById("acctWho");
++    if (!idBlock) {
++      idBlock = document.createElement("div");
++      idBlock.id = "acctWho"; idBlock.className = "acct-id";
++      var host = document.getElementById("acct");
++      if (host) host.insertBefore(idBlock, host.firstChild);
++    }
++    var role = esc(PB.role() || "");
++    idBlock.innerHTML = '<span class="nm">' + esc(PB.name() || "Signed in") + "</span>" +
++                        '<span class="mt">' + (role ? role.charAt(0).toUpperCase() + role.slice(1) : "") +
++                        (siteName ? " &middot; " + siteName : "") + "</span>";
++
++    bar.innerHTML = (list.length > 1
++                      ? '<span class="site"><select id="siteSel" aria-label="Project">' + opts + "</select></span>"
++                      : '<span class="site"><span>' + siteName + "</span></span>") +
++                    '<span class="role">' + esc(PB.role() || "") + "</span>" +
++                    (PB.isAdmin() ? '<button type="button" class="people" id="people">Manage people</button>' : "") +
++                    '<button type="button" id="signOut" title="' + esc(PB.name() || "") + '">Sign out</button>';
+     bar.style.display = "flex";
+     var sel = document.getElementById("siteSel");
+     if (sel) sel.onchange = function () { PB.useSite(this.value); };
+diff --git a/src/board.html b/src/board.html
+index 949e9e6..4d03700 100644
+--- a/src/board.html
++++ b/src/board.html
+@@ -2,92 +2,63 @@
+ <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+ <style>
+   :root {
+-    --bg: #F2F4F5;
+-    --surface: #FFFFFF;
+-    --surface-2: #E9ECEE;
+-    --sunk: #E3E7E9;
+-    --line: #D6DCDF;
+-    --line-soft: #E6EAEC;
+-    --ink: #14181B;
+-    --ink-2: #5A6469;
+-    --ink-3: #8A9399;
+-    --accent: #12615E;
+-    --accent-soft: #DCEBEA;
++    color-scheme: light;
++
++    /* ---- surfaces: warm cream is the dominant ground ---- */
++    --bg: #F7F3EA;            /* --bg-main   */
++    --bg-soft: #FBF8F2;
++    --surface: #FFFDF8;       /* cards, panels */
++    --surface-elevated: #FFFFFF;   /* report paper, menus — reads as lifted off the cream */
++    --surface-2: #F1EBE0;     /* subtle fills, hovers */
++    --sunk: #EAE3D6;          /* progress tracks */
++
++    /* ---- ink: GrowwithMH navy ---- */
++    --ink: #010B24;           /* --text-primary   */
++    --ink-2: #56606F;         /* --text-secondary — 5.8:1 on cream */
++    --ink-3: #646D7E;         /* --text-muted     — 4.7:1 on cream, never lighter */
++
++    /* ---- lines ---- */
++    --line: #E5DED2;          /* --border        */
++    --line-strong: #D5CBB9;
++    --line-soft: #F0EAE0;
++
++    /* ---- accent ----
++       The brand aqua (#2BAFA6) only reaches 2.7:1 on white, so it carries
++       decoration — progress, swatches, rails — and never text or a filled
++       control. --accent is the AA-safe teal used for anything readable. */
++    --accent: #0F6F69;        /* 6.0:1 with white ink, 5.6:1 as text on cream */
++    --accent-bright: #2BAFA6;
++    --accent-hover: #218F88;
++    --accent-soft: #E3F3F1;
+     --accent-ink: #FFFFFF;
+-    --good: #2C7A4B;
+-    --good-soft: #DDEEE4;
+-    --warn: #9A6407;
+-    --warn-soft: #F5E9D2;
+-    --bad: #B5342B;
+-    --bad-soft: #F7DEDC;
+-    --shadow: 0 1px 2px rgba(20,24,27,.06), 0 6px 18px rgba(20,24,27,.05);
+-    --radius: 10px;
++
++    /* ---- states ---- */
++    --good: #1F7A4C;  --good-soft: #DFF0E5;
++    --warn: #8A5A08;  --warn-soft: #F7EBD5;
++    --bad:  #A83229;  --bad-soft:  #F8E2DF;
++    --info: #1B4FA6;  --info-soft: #E4EDF9;
++
++    /* ---- shape + depth ---- */
++    --radius-sm: 8px;
++    --radius-md: 12px;
++    --radius-lg: 16px;
++    --radius: var(--radius-md);
++    --shadow-sm: 0 1px 2px rgba(1,11,36,.05);
++    --shadow-md: 0 1px 2px rgba(1,11,36,.05), 0 8px 24px rgba(1,11,36,.06);
++    --shadow-lg: 0 18px 48px rgba(1,11,36,.14);
++    --shadow: var(--shadow-sm);
++
+     --f-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+     --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+     --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+-    /* pipeline ramp — one hue, light to dark (ordinal stages, validated) */
+-    --st-1: #DCEBEA;
+-    --st-2: #7AB6AF;
+-    --st-3: #34827A;
+-    --st-4: #0C4B47;
+-    --tag-bg: hsl(var(--ws-h, 185) 26% 92%);
+-    --tag-fg: hsl(var(--ws-h, 185) 42% 28%);
+-  }
+-  @media (prefers-color-scheme: dark) {
+-    :root:not([data-theme="light"]) {
+-      --bg: #101314;
+-      --surface: #181C1E;
+-      --surface-2: #21262A;
+-      --sunk: #14181A;
+-      --line: #2C3236;
+-      --line-soft: #232a2d;
+-      --ink: #E8ECEE;
+-      --ink-2: #9AA5AB;
+-      --ink-3: #737E84;
+-      --accent: #4FB3A9;
+-      --accent-soft: #17332F;
+-      --accent-ink: #06201F;
+-      --good: #63BC87;
+-      --good-soft: #16301F;
+-      --warn: #D4A03A;
+-      --warn-soft: #32270F;
+-      --bad: #E58279;
+-      --bad-soft: #351A18;
+-      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.28);
+-      --st-1: #26433F;
+-      --st-2: #47837C;
+-      --st-3: #74BEB2;
+-      --st-4: #D6F2EA;
+-      --tag-bg: hsl(var(--ws-h, 185) 22% 18%);
+-      --tag-fg: hsl(var(--ws-h, 185) 45% 72%);
+-    }
+-  }
+-  :root[data-theme="dark"] {
+-    --bg: #101314;
+-    --surface: #181C1E;
+-    --surface-2: #21262A;
+-    --sunk: #14181A;
+-    --line: #2C3236;
+-    --line-soft: #232a2d;
+-    --ink: #E8ECEE;
+-    --ink-2: #9AA5AB;
+-    --ink-3: #737E84;
+-    --accent: #4FB3A9;
+-    --accent-soft: #17332F;
+-    --accent-ink: #06201F;
+-    --good: #63BC87;
+-    --good-soft: #16301F;
+-    --warn: #D4A03A;
+-    --warn-soft: #32270F;
+-    --bad: #E58279;
+-    --bad-soft: #351A18;
+-    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.28);
+-    --st-1: #26433F;
+-    --st-2: #47837C;
+-    --st-3: #74BEB2;
+-    --st-4: #D6F2EA;
+-    --tag-bg: hsl(var(--ws-h, 185) 22% 18%);
+-    --tag-fg: hsl(var(--ws-h, 185) 45% 72%);
++
++    /* pipeline ramp — one hue, light to dark (ordinal stages) */
++    --st-1: #DCEFEC;
++    --st-2: #7FCFC7;
++    --st-3: #2BAFA6;
++    --st-4: #0F6F69;
++    --tag-bg: hsl(var(--ws-h, 185) 32% 93%);
++    --tag-fg: hsl(var(--ws-h, 185) 46% 26%);
+   }
+ 
+   * { box-sizing: border-box; }
+@@ -99,7 +70,7 @@
+     line-height: 1.5;
+     -webkit-font-smoothing: antialiased;
+   }
+-  .wrap { max-width: 1240px; margin: 0 auto; padding: 28px 20px 72px; display: flex; flex-direction: column; gap: 26px; }
++  .wrap { max-width: 1320px; margin: 0 auto; padding: 22px 24px 96px; display: flex; flex-direction: column; gap: 22px; }
+   h1, h2, h3, h4 { font-family: var(--f-display); margin: 0; text-wrap: balance; }
+   button { font: inherit; cursor: pointer; }
+   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+@@ -111,42 +82,53 @@
+   .spacer { flex: 1 1 auto; }
+ 
+   /* ---------- masthead + tabs ---------- */
+-  header.top { display: flex; flex-direction: column; gap: 4px; }
+-  header.top h1 { font-size: 30px; font-weight: 700; letter-spacing: -.02em; }
+-  header.top p { margin: 2px 0 0; color: var(--ink-2); max-width: 62ch; }
+-  .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+-  .conn { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-2); }
++  header.top {
++    display: flex; flex-direction: column; gap: 2px;
++    position: sticky; top: 0; z-index: 25; background: var(--bg);
++    margin: -22px -24px 0; padding: 16px 24px 0; border-bottom: 1px solid var(--line);
++  }
++  header.top h1 { font-size: 25px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; }
++  header.top p { margin: 3px 0 0; color: var(--ink-2); max-width: 62ch; font-size: 13.5px; }
++  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
++  .brandblock { min-width: 0; }
++  .conn { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); flex: none; }
+   .dot.off { background: var(--warn); }
+-  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-top: 14px; }
++  .tabs { display: flex; gap: 4px; margin-top: 10px; }
+   .tabs button {
+     border: 0; background: transparent; color: var(--ink-2); font-family: var(--f-display);
+-    font-size: 14px; font-weight: 600; padding: 9px 15px; border-bottom: 2px solid transparent; margin-bottom: -1px;
++    font-size: 14px; font-weight: 600; padding: 9px 14px 10px; border-radius: var(--radius-sm) var(--radius-sm) 0 0;
++    border-bottom: 2px solid transparent; margin-bottom: -1px;
++  }
++  .tabs button:hover { color: var(--ink); background: var(--surface-2); }
++  /* selected state carries weight and an underline, never colour alone */
++  .tabs button[aria-selected="true"] {
++    color: var(--accent); border-bottom-color: var(--accent);
++    background: var(--accent-soft); font-weight: 700;
+   }
+-  .tabs button:hover { color: var(--ink); }
+-  .tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+ 
+   /* ---------- progress rail ---------- */
+   .rail {
+     background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+-    padding: 20px 22px; display: grid; grid-template-columns: minmax(200px, 260px) 1fr; gap: 28px;
++    padding: 16px 18px; display: grid; grid-template-columns: minmax(180px, 236px) 1fr; gap: 22px;
++    box-shadow: var(--shadow-sm);
+   }
+-  .rail-total { display: flex; flex-direction: column; gap: 6px; border-right: 1px solid var(--line-soft); padding-right: 26px; }
+-  .big { font-family: var(--f-display); font-size: 42px; font-weight: 700; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; }
++  .rail-total { display: flex; flex-direction: column; gap: 5px; border-right: 1px solid var(--line-soft); padding-right: 22px; }
++  .big { font-family: var(--f-display); font-size: 34px; font-weight: 700; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+   .big span { font-size: 20px; color: var(--ink-3); font-weight: 600; }
+   .total-bar { height: 8px; border-radius: 99px; background: var(--sunk); overflow: hidden; display: flex; margin-top: 6px; }
+   .total-bar i { display: block; height: 100%; }
+   .total-bar i.live { background: var(--good); }
+-  .total-bar i.prog { background: var(--accent); }
++  .total-bar i.prog { background: var(--accent-bright); }
+   .legend { display: flex; gap: 14px; font-size: 12px; color: var(--ink-2); flex-wrap: wrap; }
+   .legend b { font-weight: 500; display: inline-flex; align-items: center; gap: 5px; }
+   .swatch { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+-  .buckets { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px 24px; align-content: center; }
+-  .bkt-name { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; margin-bottom: 6px; }
+-  .bkt-name span:first-child { font-weight: 500; }
+-  .bkt-name .cnt { font-family: var(--f-mono); font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+-  .bkt-bar { height: 5px; border-radius: 99px; background: var(--sunk); overflow: hidden; display: flex; }
+-  .bkt-bar i { display: block; height: 100%; background: var(--accent); }
++  .buckets { display: grid; grid-template-columns: repeat(auto-fit, minmax(134px, 1fr)); gap: 10px 20px; align-content: center; }
++  .bkt-name { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12.5px; margin-bottom: 4px; }
++  .bkt-name span:first-child { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  .bkt-name .cnt { font-family: var(--f-mono); font-size: 11.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; flex: none; }
++  .bkt-bar { height: 4px; border-radius: 99px; background: var(--sunk); overflow: hidden; display: flex; }
++  .bkt-bar i { display: block; height: 100%; background: var(--accent-bright); }
+   .bkt-bar i.done { background: var(--good); }
+ 
+   /* ---------- workstream strip ---------- */
+@@ -162,7 +144,7 @@
+   .ws-tile .val { font-family: var(--f-mono); font-size: 17px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+   .ws-tile .val small { font-size: 11.5px; color: var(--ink-3); font-family: var(--f-body); letter-spacing: 0; }
+   .ws-tile .tr { height: 4px; border-radius: 99px; background: var(--sunk); overflow: hidden; }
+-  .ws-tile .tr i { display: block; height: 100%; background: hsl(var(--ws-h) 42% 42%); }
++  .ws-tile .tr i { display: block; height: 100%; background: hsl(var(--ws-h) 44% 38%); }
+ 
+   /* ---------- toolbar ---------- */
+   .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+@@ -173,37 +155,49 @@
+     display: inline-flex; align-items: center; gap: 6px; transition: background .12s, color .12s, border-color .12s;
+   }
+   .chip:hover { border-color: var(--ink-3); color: var(--ink); }
+-  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
++  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+   .chip .n { font-family: var(--f-mono); font-size: 11.5px; opacity: .75; }
+   .chip.alarm[aria-pressed="false"] { color: var(--bad); border-color: var(--bad-soft); background: var(--bad-soft); }
+   .btn {
+     border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+-    padding: 7px 14px; border-radius: 8px; font-weight: 600; font-size: 13.5px; font-family: var(--f-display);
+-  }
+-  .btn.ghost { background: transparent; color: var(--ink-2); border-color: var(--line); }
+-  .btn.ghost:hover { color: var(--ink); border-color: var(--ink-3); }
+-  .btn.danger { background: transparent; color: var(--bad); border-color: var(--line); }
++    padding: 8px 15px; border-radius: var(--radius-sm); font-weight: 600; font-size: 13.5px;
++    font-family: var(--f-display); min-height: 38px; transition: background .12s, border-color .12s;
++  }
++  .btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
++  .btn.ghost { background: var(--surface); color: var(--ink-2); border-color: var(--line); }
++  .btn.ghost:hover { color: var(--ink); border-color: var(--line-strong); background: var(--surface-2); }
++  .btn.danger { background: var(--surface); color: var(--bad); border-color: var(--line); }
++  .btn.danger:hover { border-color: var(--bad); background: var(--bad-soft); }
++  /* a filter, not a form field: micro label, navy value, quiet frame */
+   .who-pick {
+-    display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2);
+-    background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px 4px 12px;
++    display: inline-flex; align-items: center; gap: 9px; min-height: 38px;
++    font-family: var(--f-display); font-size: 10px; font-weight: 600;
++    letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
++    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm);
++    padding: 3px 8px 3px 12px;
++  }
++  .who-pick:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
++  .who-pick select {
++    border: 0; background: transparent; color: var(--ink); font-family: var(--f-body);
++    font-size: 13.5px; font-weight: 600; letter-spacing: 0; text-transform: none;
++    padding: 3px 2px; max-width: 190px;
+   }
+-  .who-pick select { border: 0; background: transparent; color: var(--ink); font: inherit; font-weight: 500; padding: 3px 2px; max-width: 190px; }
+ 
+   /* ---------- board ---------- */
+   .board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-items: start; }
+-  .col { background: var(--surface-2); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 10px; min-height: 120px; border: 1px solid transparent; }
++  .col { background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 10px; min-height: 120px; }
+   .col.over { border-color: var(--accent); background: var(--accent-soft); }
+   .col-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px; }
+-  .col-head h2 { font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
++  .col-head h2 { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
+   .col-head .pill { font-family: var(--f-mono); font-size: 11px; color: var(--ink-2); background: var(--surface); border: 1px solid var(--line-soft); border-radius: 99px; padding: 1px 8px; }
+   .col-list { display: flex; flex-direction: column; gap: 8px; }
+   .card {
+-    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+-    padding: 11px 12px 10px; display: flex; flex-direction: column; gap: 8px;
+-    text-align: left; width: 100%; color: inherit; box-shadow: var(--shadow);
+-    transition: transform .12s ease, border-color .12s ease;
++    background: var(--surface-elevated); border: 1px solid var(--line); border-radius: var(--radius-sm);
++    padding: 11px 12px 10px; display: flex; flex-direction: column; gap: 7px;
++    text-align: left; width: 100%; color: inherit; box-shadow: var(--shadow-sm);
++    transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
+   }
+-  .card:hover { border-color: var(--ink-3); transform: translateY(-1px); }
++  .card:hover { border-color: var(--accent); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+   .card.blocked { border-left: 3px solid var(--bad); padding-left: 10px; }
+   .card.dragging { opacity: .45; }
+   .card-top { display: flex; align-items: center; gap: 8px; }
+@@ -221,25 +215,27 @@
+   .ava.lg { width: 44px; height: 44px; font-size: 16px; }
+   .pg { font-family: var(--f-mono); font-size: 11.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+   .mini { flex: 1 1 auto; height: 4px; border-radius: 99px; background: var(--sunk); overflow: hidden; min-width: 26px; }
+-  .mini i { display: block; height: 100%; background: var(--accent); }
++  .mini i { display: block; height: 100%; background: var(--accent-bright); }
+   .flag { font-size: 11.5px; color: var(--bad); display: flex; gap: 5px; align-items: flex-start; line-height: 1.35; }
+   .due { font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); }
+   .due.late { color: var(--bad); font-weight: 500; }
+-  .empty { font-size: 12.5px; color: var(--ink-3); padding: 8px 4px 12px; }
++  .empty { font-size: 12.5px; color: var(--ink-3); padding: 10px 4px 12px; line-height: 1.5; }
++  .empty b { display: block; font-family: var(--f-display); font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 2px; }
+   .add-inline { border: 1px dashed var(--line); background: transparent; color: var(--ink-3); border-radius: 8px; padding: 8px; font-size: 12.5px; text-align: center; }
+   .add-inline:hover { color: var(--accent); border-color: var(--accent); }
+ 
+   /* ---------- panels ---------- */
+-  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; }
++  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow-sm); }
+   .panel h2 { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+   .panel .sub { font-size: 12.5px; color: var(--ink-3); margin: 0 0 14px; }
+   .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+   .head-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+   .linkbtn {
+     border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+-    font-family: var(--f-display); font-size: 12.5px; font-weight: 600; padding: 5px 11px; border-radius: 7px; flex: none;
++    font-family: var(--f-display); font-size: 12.5px; font-weight: 600; padding: 6px 12px;
++    border-radius: var(--radius-sm); flex: none; min-height: 34px;
+   }
+-  .linkbtn:hover { color: var(--accent); border-color: var(--accent); }
++  .linkbtn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+   table.team { width: 100%; border-collapse: collapse; }
+   table.team th { text-align: left; font-family: var(--f-display); font-size: 10.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); padding: 0 8px 8px 0; }
+   table.team th.num, table.team td.num { text-align: right; padding-right: 0; font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+@@ -310,8 +306,9 @@
+   .field input[type="color"] { padding: 3px; height: 38px; }
+   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+   .paper {
+-    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
++    background: var(--surface-elevated); border: 1px solid var(--line); border-radius: var(--radius);
+     padding: 34px 38px 40px; display: flex; flex-direction: column; gap: 26px;
++    box-shadow: var(--shadow-md);
+   }
+   .rep-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; border-bottom: 2px solid var(--rep-accent, var(--accent)); padding-bottom: 16px; }
+   .rep-head img { max-height: 46px; max-width: 190px; display: block; }
+@@ -323,7 +320,7 @@
+   .rep-sum { font-size: 14.5px; line-height: 1.62; color: var(--ink-2); max-width: 68ch; }
+   .rep-sum b { color: var(--ink); font-weight: 600; }
+   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 1px; background: var(--line-soft); border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
+-  .kpi { background: var(--surface); padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; }
++  .kpi { background: var(--surface-elevated); padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; }
+   .kpi .v { font-family: var(--f-display); font-size: 25px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+   .kpi .k { font-size: 11.5px; color: var(--ink-3); }
+   .charts { display: grid; grid-template-columns: 236px 1fr; gap: 30px; align-items: center; }
+@@ -358,13 +355,13 @@
+   .linkbtn.danger-txt:hover { color: var(--bad); border-color: var(--bad); }
+ 
+   /* ---------- drawers ---------- */
+-  .scrim { position: fixed; inset: 0; background: rgba(10,14,16,.45); opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 40; }
++  .scrim { position: fixed; inset: 0; background: rgba(1,11,36,.42); opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 40; }
+   .scrim.open { opacity: 1; pointer-events: auto; }
+   .drawer {
+     position: fixed; top: 0; right: 0; height: 100%; width: min(430px, 100%);
+     background: var(--surface); border-left: 1px solid var(--line); z-index: 50;
+     transform: translateX(102%); transition: transform .22s cubic-bezier(.4,0,.2,1);
+-    display: flex; flex-direction: column; box-shadow: -12px 0 40px rgba(10,14,16,.16);
++    display: flex; flex-direction: column; box-shadow: var(--shadow-lg);
+   }
+   .drawer.open { transform: none; }
+   .drawer-head { padding: 18px 20px 14px; border-bottom: 1px solid var(--line-soft); display: flex; align-items: flex-start; gap: 12px; }
+@@ -372,11 +369,11 @@
+   .drawer-foot { padding: 14px 20px; border-top: 1px solid var(--line-soft); display: flex; gap: 8px; align-items: center; }
+   .x { border: 0; background: transparent; color: var(--ink-3); font-size: 20px; line-height: 1; padding: 2px 6px; margin-left: auto; }
+   .x:hover { color: var(--ink); }
+-  .seg { display: flex; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 3px; gap: 3px; }
++  .seg { display: flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 3px; gap: 3px; }
+   .seg button { flex: 1; border: 0; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 500; padding: 6px 4px; border-radius: 5px; font-family: var(--f-display); }
+-  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
++  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 700; box-shadow: var(--shadow-sm); }
+   .toggle { display: flex; align-items: center; gap: 9px; font-size: 13.5px; color: var(--ink-2); }
+-  .logbox { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 13px 14px; display: flex; flex-direction: column; gap: 10px; }
++  .logbox { background: var(--bg-soft); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 13px 14px; display: flex; flex-direction: column; gap: 10px; }
+   .logbox h4 { font-family: var(--f-display); font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); margin: 0; }
+   .stepper { display: flex; align-items: center; gap: 8px; }
+   .stepper button { width: 30px; height: 30px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 16px; line-height: 1; }
+@@ -385,7 +382,8 @@
+ 
+   .toast {
+     position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 14px);
+-    background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 8px;
++    max-width: calc(100vw - 32px); text-align: center;
++    background: var(--ink); color: #FFFDF8; padding: 9px 16px; border-radius: 8px;
+     font-size: 13px; font-weight: 500; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 60;
+   }
+   .toast.show { opacity: 1; transform: translate(-50%, 0); }
+@@ -592,8 +590,8 @@
+   }
+   .tray {
+     position: absolute; top: 42px; right: 0; width: min(378px, calc(100vw - 32px));
+-    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+-    box-shadow: 0 12px 40px rgba(10,14,16,.18); z-index: 30; overflow: hidden;
++    background: var(--surface-elevated); border: 1px solid var(--line); border-radius: var(--radius);
++    box-shadow: var(--shadow-lg); z-index: 30; overflow: hidden;
+     display: flex; flex-direction: column; max-height: 460px;
+   }
+   .tray-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line-soft); }
+@@ -618,15 +616,17 @@
+   .nt .wh { font-family: var(--f-mono); font-size: 10.5px; color: var(--ink-3); margin-top: 3px; display: block; }
+ 
+   /* ---------- meetings ---------- */
+-  .mtg { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line-soft); text-align: left; background: transparent; border-left: 0; border-right: 0; border-bottom: 0; width: 100%; color: inherit; cursor: pointer; }
++  .mtg { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line-soft); text-align: left; background: transparent; border-left: 0; border-right: 0; border-bottom: 0; width: 100%; color: inherit; cursor: pointer; min-width: 0; }
+   .mtg:first-of-type { border-top: 0; }
+   .mtg:hover .mt-t { color: var(--accent); }
++  .mtg .mt-x { flex: 1 1 auto; min-width: 0; }
++  .mtg .mt-t, .mtg .mt-s { overflow: hidden; text-overflow: ellipsis; }
+   .mtg .cal {
+-    width: 44px; flex: none; text-align: center; background: var(--bg); border: 1px solid var(--line-soft);
+-    border-radius: 7px; padding: 4px 0 5px;
++    width: 44px; flex: none; text-align: center; background: var(--accent-soft); border: 1px solid var(--line-soft);
++    border-radius: var(--radius-sm); padding: 4px 0 5px; color: var(--accent);
+   }
+   .mtg .cal .d { display: block; font-family: var(--f-display); font-size: 16px; font-weight: 700; line-height: 1.1; }
+-  .mtg .cal .m { display: block; font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); }
++  .mtg .cal .m { display: block; font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); opacity: .8; }
+   .mtg .mt-t { display: block; font-size: 13.5px; font-weight: 600; }
+   .mtg .mt-s { display: block; font-size: 12px; color: var(--ink-3); margin-top: 1px; }
+   .mtg .soon { font-family: var(--f-mono); font-size: 11px; color: var(--warn); margin-left: auto; flex: none; }
+@@ -640,6 +640,16 @@
+   }
+   .checks label:hover { color: var(--ink); }
+ 
++  /* ---------- account menu ---------- */
++  .acct { display: flex; align-items: center; gap: 8px; }
++  .acct-item {
++    border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
++    font-family: var(--f-display); font-size: 12.5px; font-weight: 600;
++    padding: 6px 12px; border-radius: var(--radius-sm); min-height: 34px; text-align: left;
++  }
++  .acct-item:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
++  .acct-id { display: none; }
++
+   @media (max-width: 1020px) {
+     .board { grid-template-columns: repeat(2, minmax(0,1fr)); }
+     .rail { grid-template-columns: 1fr; gap: 20px; }
+@@ -650,23 +660,42 @@
+ 
+   /* ============ mobile ============ */
+   @media (max-width: 700px) {
+-    .wrap { padding: 0 0 96px; gap: 0; }
++    .wrap { padding: 0 0 calc(104px + env(safe-area-inset-bottom, 0px)); gap: 0; }
+     .m-only { display: revert; }
+ 
+     /* --- app bar: identity and navigation stay reachable at any scroll depth --- */
+     header.top {
+       position: sticky; top: 0; z-index: 25; background: var(--bg);
+-      padding: 12px 16px 0; margin: 0; gap: 0;
+-      box-shadow: 0 1px 0 var(--line);
++      padding: 10px 16px 0; margin: 0; gap: 0;
++      border-bottom: 1px solid var(--line);
+     }
+     header.top .topbar { align-items: center; gap: 10px; flex-wrap: nowrap; }
+-    header.top h1 { font-size: 19px; letter-spacing: -.01em; }
+-    header.top .eyebrow { font-size: 9.5px; margin-bottom: 1px; }
++    header.top h1 { font-size: 21px; letter-spacing: -.015em; }
++    header.top .eyebrow { font-size: 10px; margin-bottom: 2px; color: var(--ink-2); }
+     header.top p, header.top .conn { display: none; }
+-    .tabs { margin-top: 10px; border-bottom: 0; gap: 0; }
+-    .tabs button { flex: 1; padding: 11px 6px 12px; font-size: 13.5px; min-height: 44px; }
++    .tabs { margin-top: 8px; gap: 2px; }
++    .tabs button {
++      flex: 1; padding: 10px 6px 11px; font-size: 13.5px; min-height: 44px;
++      border-radius: var(--radius-sm) var(--radius-sm) 0 0;
++    }
+     .bell { width: 40px; height: 40px; }
+ 
++    /* --- account: a sheet under the avatar, replacing the old floating bar --- */
++    .acct {
++      position: absolute; top: calc(100% + 10px); right: 0; z-index: 46;
++      display: none; flex-direction: column; align-items: stretch; gap: 6px;
++      width: min(268px, calc(100vw - 32px)); padding: 10px;
++      background: var(--surface-elevated); border: 1px solid var(--line);
++      border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
++    }
++    body.acct-open .acct { display: flex; }
++    .acct-item { width: 100%; min-height: 42px; }
++    .acct-id {
++      display: block; padding: 4px 4px 8px; border-bottom: 1px solid var(--line-soft); margin-bottom: 2px;
++    }
++    .acct-id .nm { display: block; font-family: var(--f-display); font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.25; }
++    .acct-id .mt { display: block; font-size: 12px; color: var(--ink-3); margin-top: 2px; }
++
+     /* sections become full-bleed bands rather than floating cards */
+     #view-board { gap: 0 !important; }
+     .rail, .panel {
+@@ -674,13 +703,16 @@
+       padding: 16px; margin: 0;
+     }
+     .panel + .panel { border-top: 8px solid var(--bg); }
++    .panel, .rail { box-shadow: none; }
+ 
+-    /* --- inventory: headline plus a two-up breakdown, not five stacked rows --- */
+-    .rail { padding-bottom: 18px; }
+-    .rail-total { padding-bottom: 14px; }
+-    .big { font-size: 32px; }
+-    .buckets { grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+-    .bkt-name { font-size: 12px; margin-bottom: 5px; }
++    /* --- inventory: one headline, then a compact two-up breakdown --- */
++    .rail { padding: 14px 16px 16px; }
++    .rail-total { padding-bottom: 12px; gap: 4px; }
++    .big { font-size: 28px; }
++    .buckets { grid-template-columns: 1fr 1fr; gap: 9px 14px; }
++    .bkt-name { font-size: 12px; margin-bottom: 4px; }
++    .rail-head { gap: 6px; align-items: center; }
++    .rail-head .linkbtn.tiny { min-height: 30px; }
+ 
+     /* --- workstreams: one swipeable rail instead of a six-tile wall --- */
+     .ws-strip {
+@@ -703,10 +735,9 @@
+     /* a select will not shrink below its content unless min-width is cleared at every level */
+     /* stacked label over control, so every picker reads the same whatever its label length */
+     .who-pick {
+-      width: 100%; min-width: 0; overflow: hidden; min-height: 48px;
+-      flex-direction: column; align-items: stretch; gap: 0; padding: 5px 8px 6px 11px;
+-      font-family: var(--f-display); font-size: 9.5px; font-weight: 600;
+-      letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
++      width: 100%; min-width: 0; overflow: hidden; min-height: 52px;
++      flex-direction: column; align-items: stretch; gap: 0; padding: 6px 8px 7px 11px;
++      font-size: 9.5px;
+     }
+     .who-pick select { width: 100%; min-width: 0; max-width: none; font-size: 14px; padding: 1px 0 0; }
+     .who-pick.wide { grid-column: 1 / -1; }
+@@ -714,17 +745,25 @@
+     /* --- board: one status at a time, switched deliberately --- */
+     .status-switch {
+       display: flex; position: sticky; top: var(--appbar-h, 96px); z-index: 20;
+-      background: var(--bg); padding: 10px 16px; gap: 6px; overflow-x: auto;
++      background: var(--bg); padding: 10px 16px; gap: 4px; overflow-x: auto;
+       border-bottom: 1px solid var(--line); scrollbar-width: none;
+     }
+     .status-switch::-webkit-scrollbar { display: none; }
+     .status-switch button {
+-      flex: 1 0 auto; min-height: 40px; padding: 8px 12px; border-radius: 99px;
++      flex: 1 1 auto; min-width: 0; min-height: 42px; padding: 8px 9px; border-radius: 99px;
+       border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+       font-family: var(--f-display); font-size: 13px; font-weight: 600; white-space: nowrap;
+     }
+-    .status-switch button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+-    .status-switch button .n { font-family: var(--f-mono); font-size: 11px; opacity: .7; margin-left: 4px; }
++    .status-switch button[aria-pressed="true"] {
++      background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
++      font-weight: 700; box-shadow: var(--shadow-sm);
++    }
++    .status-switch button { font-size: 12.5px; }
++    .status-switch button .n {
++      font-family: var(--f-mono); font-size: 10.5px; margin-left: 4px;
++      background: rgba(1,11,36,.07); border-radius: 99px; padding: 1px 5px;
++    }
++    .status-switch button[aria-pressed="true"] .n { background: rgba(255,255,255,.22); }
+     .board { display: block; padding: 12px 16px 16px; }
+     .col { background: transparent; padding: 0; }
+     .col.m-hide { display: none; }
+@@ -735,13 +774,14 @@
+     /* --- one thumb-reachable primary action --- */
+     .fab {
+       display: grid; place-items: center; position: fixed; z-index: 24;
+-      right: 16px; bottom: calc(18px + env(safe-area-inset-bottom, 0px));
++      right: 16px; bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+       width: 56px; height: 56px; border-radius: 50%;
+       background: var(--accent); color: var(--accent-ink); border: 0;
+       font-size: 28px; line-height: 1; padding-bottom: 3px;
+-      box-shadow: 0 6px 20px rgba(10,14,16,.28);
++      box-shadow: 0 8px 24px rgba(1,11,36,.26);
+     }
+     .fab-menu { display: flex; }
++    .toast { bottom: calc(94px + env(safe-area-inset-bottom, 0px)); }
+     #repFab { padding-bottom: 0; }
+ 
+     /* --- drawers become bottom sheets: controls land under the thumb --- */
+@@ -841,8 +881,9 @@
+   }
+ 
+   @media (max-width: 380px) {
+-    .buckets { grid-template-columns: 1fr; }
+     .toolbar { grid-template-columns: 1fr; }
++    header.top h1 { font-size: 19px; }
++    .big { font-size: 26px; }
+   }
+   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+ 
+@@ -852,9 +893,10 @@
+     body { background: #fff; }
+     .wrap { max-width: none; padding: 0; gap: 0; }
+     .paper {
+-      border: 0; border-radius: 0; padding: 0; background: #fff; color: #14181B;
+-      --surface: #fff; --bg: #fff; --ink: #14181B; --ink-2: #4A5459; --ink-3: #7A8388;
+-      --line: #D6DCDF; --line-soft: #E6EAEC; --sunk: #EDF0F1;
++      border: 0; border-radius: 0; padding: 0; background: #fff; color: #010B24; box-shadow: none;
++      --surface: #fff; --surface-elevated: #fff; --bg: #fff; --surface-2: #fff;
++      --ink: #010B24; --ink-2: #414B5C; --ink-3: #646D7E;
++      --line: #D9D2C6; --line-soft: #E9E3D9; --sunk: #EDE9E1;
+     }
+     .rep-sec, .charts, .kpis { break-inside: avoid; }
+     #view-report[hidden] .paper, #view-me[hidden] .paper { display: none !important; }
+@@ -864,7 +906,7 @@
+ <div class="wrap">
+   <header class="top no-print">
+     <div class="topbar">
+-      <div>
++      <div class="brandblock">
+         <div class="eyebrow">RMM Builders Ltd &middot; Birmingham B6</div>
+         <h1>Build board</h1>
+         <p id="strap">Every planned task, who owns it, and what's holding it up. Drag a card to move it, or open one to log progress.</p>
+@@ -879,7 +921,12 @@
+           <div class="tray-head"><h3>Notifications</h3><button id="markAll">Mark all read</button></div>
+           <div class="tray-list" id="trayList"></div>
+         </div>
+-        <button class="avabtn" id="meBtn" aria-label="Your profile"></button>
++        <button class="avabtn" id="meBtn" aria-label="Your profile" aria-haspopup="menu" aria-expanded="false"></button>
++        <!-- account: inline in the header on desktop, a sheet under the avatar on mobile -->
++        <div class="acct no-print" id="acct">
++          <button class="acct-item m-only" id="acctMe" type="button">My work</button>
++          <div id="acctSlot"></div>
++        </div>
+       </div>
+     </div>
+     <nav class="tabs" role="tablist">
+@@ -1230,14 +1277,14 @@
+     <button class="btn ghost" id="iReset">Reset to 94</button>
+   </div>
+ </aside>
+-<button class="fab no-print" id="fabAdd" aria-label="New task">+</button>
++<button class="fab no-print" id="fabAdd" aria-label="New task" title="New task">+</button>
+ <div class="fab-menu no-print" id="repMenu" hidden>
+   <button data-act="ai" id="mAi">Draft commentary with Claude</button>
+   <button data-act="brand">Branding</button>
+   <button data-act="dl">Download HTML</button>
+   <button data-act="print" class="primary">Print / Save PDF</button>
+ </div>
+-<button class="fab no-print" id="repFab" aria-label="Report actions" aria-expanded="false">
++<button class="fab no-print" id="repFab" aria-label="Report actions" title="Report actions" aria-expanded="false">
+   <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"></circle><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"></circle></svg>
+ </button>
+ <div class="toast no-print" id="toast"></div>
+@@ -1757,7 +1804,7 @@
+       return !m.at || new Date(m.at) > new Date(Date.now() - 6 * 3600000);
+     });
+     if (!ms.length) {
+-      $("mtgList").innerHTML = "<div class='empty'>Nothing scheduled. Anyone invited to a meeting gets a notification as it approaches.</div>";
++      $("mtgList").innerHTML = "<div class='empty'><b>No meetings scheduled.</b>Anyone you invite is notified as the time approaches.</div>";
+       return;
+     }
+     $("mtgList").innerHTML = ms.map(function (m) {
+@@ -1860,7 +1907,12 @@
+         '"><div class="col-head"><h2>' + s.label +
+         '</h2><span class="pill">' + items.length + (n ? " &middot; " + n : "") + "</span></div>" +
+         '<div class="col-list">' +
+-        (items.length ? items.map(cardHTML).join("") : '<div class="empty">Nothing in ' + s.label.toLowerCase() + ".</div>") +
++        (items.length ? items.map(cardHTML).join("")
++          : '<div class="empty"><b>No tasks ' + s.label.toLowerCase() + " yet.</b>" +
++            (s.id === "backlog" ? "Anything planned but not started lands here."
++             : s.id === "writing" ? "Move a card here once someone starts on it."
++             : s.id === "review" ? "Submitted work waiting on a check appears here."
++             : "Approved work shows here once it is signed off.") + "</div>") +
+         (s.id === "backlog" ? '<button class="add-inline" data-add="1">+ Add a task</button>' : "") +
+         "</div></div>";
+     }).join("");
+@@ -1873,7 +1925,7 @@
+   }
+   function renderFeed() {
+     if (!state.activity.length) {
+-      $("feed").innerHTML = "<div class='empty'>No updates yet. Open a task and use “Log progress”.</div>";
++      $("feed").innerHTML = "<div class='empty'><b>No activity yet.</b>Open a task and use “Log progress” to write the first entry.</div>";
+       return;
+     }
+     $("feed").innerHTML = state.activity.map(function (e) {
+@@ -3367,7 +3419,26 @@
+     }, 700);
+   });
+ 
+-  $("meBtn").addEventListener("click", function () { setView("me"); });
++  // desktop keeps the account controls inline in the header, so the avatar goes
++  // straight to My work; on mobile it opens the account sheet instead
++  function acctMobile() { return window.matchMedia("(max-width: 700px)").matches; }
++  function setAcct(open) {
++    document.body.classList.toggle("acct-open", !!open);
++    $("meBtn").setAttribute("aria-expanded", open ? "true" : "false");
++  }
++  $("meBtn").addEventListener("click", function (e) {
++    if (!acctMobile()) { setAcct(false); setView("me"); return; }
++    e.stopPropagation();
++    setAcct(!document.body.classList.contains("acct-open"));
++  });
++  $("acctMe").addEventListener("click", function () { setAcct(false); setView("me"); });
++  document.addEventListener("click", function (e) {
++    if (!document.body.classList.contains("acct-open")) return;
++    if (e.target.closest("#acct") || e.target.closest("#meBtn")) return;
++    setAcct(false);
++  });
++  document.addEventListener("keydown", function (e) { if (e.key === "Escape") setAcct(false); });
++  window.addEventListener("resize", function () { if (!acctMobile()) setAcct(false); });
+   document.addEventListener("click", function (e) {
+     if (e.target.closest("#pfPhoto")) { $("pfFile").click(); return; }
+     if (e.target.closest("#pfClear")) {
+-- 
+2.43.0
+
+
+From 3f35dca0a5197e1522f703ad9c17385b4676a650 Mon Sep 17 00:00:00 2001
+From: Mehedi <growwithmh@gmail.com>
+Date: Sun, 13 Sep 2026 09:18:22 +0000
+Subject: [PATCH 2/2] Complete authenticated member and profile workflow
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The board still carried pre-auth identity habits: it asked a signed-in
+person to pick themselves out of a list, and a member with no roster row
+saw "Who are you?" instead of their own work. The account is the identity
+now, end to end.
+
+Identity
+- ensureOwnTeamProfile() runs after the profile and site resolve, creating
+  the roster row from the authenticated name. It never overwrites an
+  existing profile, and reactivates one that was marked inactive.
+- state.me is PB.me(). The legacy pickers are inert when Supabase is
+  configured and survive only for an unconfigured local demo.
+- My Work shows a setup state while the row is created and a retry on
+  failure — never a fallback to the picker.
+
+Roster lifecycle
+- Removal marks the profile inactive rather than deleting it, so a task
+  assigned years ago still names the right person. Rejoining reactivates.
+- Assignment pickers offer active members only; historic names still
+  resolve. Job title (team.body.role) is never confused with membership
+  role.
+- Invitations require a full name and generate a permanent board key when
+  one is not supplied. The key is never derived from the email.
+
+Interface
+- The avatar menu states who you are, then My work, My profile, Manage
+  people (owner/admin), Switch project (only with more than one), Sign out.
+- Renaming yourself updates people.name and your own roster row together.
+- The inventory editor is offered to owners and admins only, and a forced
+  save explains itself instead of surfacing 42501.
+- The page you were on survives a refresh, scoped per project and person.
+  Board is the default, never My Work.
+
+No schema, RLS or credential changes. 82 tests passing.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019E2117vinDTKgNRTjE5rjj
+---
+ .github/workflows/ci.yml |   3 +
+ build.py                 |  56 +++++-----
+ package.json             |   7 +-
+ public/access.js         |  22 +++-
+ public/index.html        | 217 ++++++++++++++++++++++++++++-----------
+ public/sb-adapter.js     |  76 ++++++++++++++
+ src/board.html           | 161 +++++++++++++++++++++++------
+ test/board.test.js       |   7 +-
+ test/identity.test.js    | 195 +++++++++++++++++++++++++++++++++++
+ test/mock-supabase.js    |   2 +
+ test/roles.test.js       |   5 +-
+ 11 files changed, 614 insertions(+), 137 deletions(-)
+ create mode 100644 test/identity.test.js
+
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index ed7e41e..7b0f70e 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -39,3 +39,6 @@ jobs:
+ 
+       - name: Roles and invitations
+         run: node test/roles.test.js
++
++      - name: Identity, roster sync and permissions
++        run: node test/identity.test.js
+diff --git a/build.py b/build.py
+index 8281808..b5acdf7 100644
+--- a/build.py
++++ b/build.py
+@@ -58,20 +58,26 @@ head = """<style>
+   #gate .gfoot{text-align:center;font-size:11.5px;color:var(--muted);margin:16px 0 0}
+ 
+   /* ---- account: inline in the header on desktop, inside .acct on mobile ---- */
+-  #whoami{display:none;align-items:center;gap:8px;font:12px "IBM Plex Sans",system-ui,sans-serif;color:var(--navy-2)}
+-  #whoami .site{display:inline-flex;align-items:center;background:var(--paper);border:1px solid var(--line);
+-    border-radius:8px;padding:0 4px 0 10px;min-height:34px;max-width:200px}
+-  #whoami select{border:0;background:transparent;font:600 12.5px "IBM Plex Sans",system-ui,sans-serif;
+-    color:var(--navy);max-width:170px;cursor:pointer;min-height:32px}
+-  #whoami select:focus{outline:none}
+-  #whoami button{border:1px solid var(--line);background:var(--paper);color:var(--navy-2);border-radius:8px;
+-    padding:0 12px;min-height:34px;font-size:12.5px;font-weight:600;cursor:pointer;
+-    font-family:"Archivo",system-ui,sans-serif}
+-  #whoami button:hover{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
+-  #whoami .people{background:var(--teal-soft);border-color:transparent;color:#0B4F4A}
+-  #whoami .role{font-family:"Archivo",system-ui,sans-serif;font-size:10px;letter-spacing:.1em;
+-    text-transform:uppercase;color:var(--muted);font-weight:700;background:var(--cream);
+-    border:1px solid var(--line);border-radius:99px;padding:3px 9px}
++  #whoami{display:none;flex-direction:column;align-items:stretch;gap:6px;width:100%;
++    font:12px "IBM Plex Sans",system-ui,sans-serif;color:var(--navy-2)}
++  #whoami button,#whoami .switch{border:1px solid var(--line);background:var(--paper);color:var(--navy-2);
++    border-radius:8px;padding:0 12px;min-height:42px;font-size:13px;font-weight:600;cursor:pointer;
++    font-family:"Archivo",system-ui,sans-serif;text-align:left;display:flex;align-items:center;width:100%}
++  #whoami button:hover,#whoami .switch:hover{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
++  #whoami .switch{flex-direction:column;align-items:stretch;justify-content:center;gap:1px;
++    padding:6px 12px;min-height:54px;color:var(--muted);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
++  #whoami .switch select{flex:1 1 auto;min-width:0;border:0;background:transparent;cursor:pointer;
++    font:600 13px "IBM Plex Sans",system-ui,sans-serif;letter-spacing:0;text-transform:none;color:var(--navy)}
++  #whoami .switch select:focus{outline:none}
++  /* signing out is not navigation — it sits apart */
++  #whoami .signout{margin-top:4px;border-top:1px solid var(--line);border-radius:0 0 8px 8px;color:var(--navy-2)}
++  #whoami button:focus-visible,#whoami select:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
++
++  /* roster and inventory are project-level: invitation replaces manual adding,
++     and only an owner or admin is offered the inventory editor */
++  body.auth-live #addPerson{display:none!important}
++  body.auth-live.can-admin #invitePerson{display:inline-flex!important}
++  body.auth-live:not(.can-admin) #editInv{display:none!important}
+   /* A viewer can read the board and the report, nothing else. The database
+      refuses their writes regardless — this just stops them being offered. */
+   body.role-viewer #addBtn, body.role-viewer #fabAdd, body.role-viewer [data-add="1"],
+@@ -79,15 +85,6 @@ head = """<style>
+   body.role-viewer #importPlan, body.role-viewer #editInv, body.role-viewer #addPerson,
+   body.role-viewer #addMeeting, body.role-viewer #xAdd{display:none!important}
+ 
+-  @media (max-width:1180px) and (min-width:701px){ #whoami .role{display:none} }
+-  @media (max-width:700px){
+-    /* inside the avatar sheet: full-width rows, nothing floating over content */
+-    #whoami{flex-direction:column;align-items:stretch;gap:6px;width:100%}
+-    #whoami .site,#whoami select{max-width:none;width:100%}
+-    #whoami .site{min-height:42px}
+-    #whoami button{min-height:42px;text-align:left}
+-    #whoami .role{display:none}   /* the sheet header already states the role */
+-  }
+ </style>
+ <div id="gate" hidden><div class="gwrap">
+   <div class="glock">
+@@ -164,12 +161,15 @@ boot = """
+                         '<span class="mt">' + (role ? role.charAt(0).toUpperCase() + role.slice(1) : "") +
+                         (siteName ? " &middot; " + siteName : "") + "</span>";
+ 
+-    bar.innerHTML = (list.length > 1
+-                      ? '<span class="site"><select id="siteSel" aria-label="Project">' + opts + "</select></span>"
+-                      : '<span class="site"><span>' + siteName + "</span></span>") +
+-                    '<span class="role">' + esc(PB.role() || "") + "</span>" +
++    // one project needs no project control; several get a labelled switcher
++    bar.innerHTML = '<button type="button" id="myProfile">My profile</button>' +
+                     (PB.isAdmin() ? '<button type="button" class="people" id="people">Manage people</button>' : "") +
+-                    '<button type="button" id="signOut" title="' + esc(PB.name() || "") + '">Sign out</button>';
++                    (list.length > 1
++                      ? '<label class="switch" for="siteSel">Switch project' +
++                        '<select id="siteSel" aria-label="Switch project">' + opts + "</select></label>"
++                      : "") +
++                    '<button type="button" class="signout" id="signOut" title="' +
++                    esc(PB.name() || "") + '">Sign out</button>';
+     bar.style.display = "flex";
+     var sel = document.getElementById("siteSel");
+     if (sel) sel.onchange = function () { PB.useSite(this.value); };
+diff --git a/package.json b/package.json
+index d2f24e4..b7ed893 100644
+--- a/package.json
++++ b/package.json
+@@ -2,12 +2,13 @@
+   "name": "build-board",
+   "version": "1.0.0",
+   "private": true,
+-  "description": "Multi-tenant SEO delivery board — Supabase backend, static frontend",
++  "description": "Multi-tenant SEO delivery board \u2014 Supabase backend, static frontend",
+   "scripts": {
+     "build": "python3 build.py",
+-    "test": "node test/board.test.js && node test/roles.test.js",
++    "test": "node test/board.test.js && node test/roles.test.js && node test/identity.test.js",
+     "test:board": "node test/board.test.js",
+-    "test:roles": "node test/roles.test.js"
++    "test:roles": "node test/roles.test.js",
++    "test:identity": "node test/identity.test.js"
+   },
+   "devDependencies": {
+     "playwright": "^1.49.0"
+diff --git a/public/access.js b/public/access.js
+index 3ee5c37..df5b156 100644
+--- a/public/access.js
++++ b/public/access.js
+@@ -149,9 +149,15 @@
+       var rm = el("button", "ac-mini", "Remove"); rm.type = "button";
+       rm.onclick = function () {
+         rm.textContent = "Removing…";
+-        PB.removeMember(m.id).then(done).catch(function (e) {
+-          rm.textContent = "Remove"; msg.textContent = e.message; msg.style.display = "block";
+-        });
++        PB.removeMember(m.id)
++          .then(function () {
++            // the roster row stays so historic tasks still name them
++            return PB.deactivateMember ? PB.deactivateMember(m.member) : null;
++          })
++          .then(done)
++          .catch(function (e) {
++            rm.textContent = "Remove"; msg.textContent = e.message; msg.style.display = "block";
++          });
+       };
+       row.appendChild(rm);
+     }
+@@ -195,7 +201,8 @@
+     var email = field("Email", "acEmail", "email", "name@company.com", true);
+     email.required = true;
+     var name = field("Full name", "acName", "text", "SEO Worker 2");
+-    var member = field("Board key", "acMember", "text", "SEO-2");
++    name.required = true;
++    var member = field("Board key", "acMember", "text", "leave blank to generate");
+ 
+     var rw = el("div", "full");
+     rw.appendChild(el("label", null, "Role"));
+@@ -215,7 +222,12 @@
+     f.onsubmit = function (ev) {
+       ev.preventDefault();
+       btn.disabled = true; btn.textContent = "Creating…"; out.innerHTML = "";
+-      PB.invite({ email: email.value, name: name.value, member: member.value, role: sel.value })
++      // the board key is a permanent internal identifier, never derived from
++      // the email address and never editable afterwards
++      var key = member.value.trim() || ("USR-" + Array.from({ length: 8 }, function () {
++        return "0123456789ABCDEF"[Math.floor(Math.random() * 16)];
++      }).join(""));
++      PB.invite({ email: email.value, name: name.value.trim(), member: key, role: sel.value })
+         .then(function (inv) {
+           btn.disabled = false; btn.textContent = "Create invitation";
+           email.value = name.value = member.value = "";
+diff --git a/public/index.html b/public/index.html
+index 8de416e..5aff65e 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -431,6 +431,10 @@
+   .pf-photo:hover .ov, .pf-photo:focus-visible .ov { opacity: 1; }
+   .pf-id { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+   .pf-id .who { display: flex; flex-direction: column; gap: 5px; min-width: 210px; }
++  .pf-id .who .pf-name {
++    font-family: var(--f-display); font-size: 19px; font-weight: 700; letter-spacing: -.01em;
++    color: var(--ink); margin: 0;
++  }
+   .pf-id .who select {
+     font: inherit; font-family: var(--f-display); font-size: 19px; font-weight: 700; letter-spacing: -.01em;
+     color: var(--ink); background: transparent; border: 0; border-bottom: 1px dashed var(--line);
+@@ -653,14 +657,26 @@
+   .checks label:hover { color: var(--ink); }
+ 
+   /* ---------- account menu ---------- */
+-  .acct { display: flex; align-items: center; gap: 8px; }
++  .acct {
++    position: absolute; top: calc(100% + 10px); right: 0; z-index: 46;
++    display: none; flex-direction: column; align-items: stretch; gap: 6px;
++    width: min(272px, calc(100vw - 32px)); padding: 10px;
++    background: var(--surface-elevated); border: 1px solid var(--line);
++    border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
++  }
++  body.acct-open .acct { display: flex; }
++  .acct-id { display: block; padding: 4px 4px 9px; border-bottom: 1px solid var(--line-soft); margin-bottom: 2px; }
++  .acct-id .nm { display: block; font-family: var(--f-display); font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.25; }
++  .acct-id .mt { display: block; font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+   .acct-item {
+     border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+     font-family: var(--f-display); font-size: 12.5px; font-weight: 600;
+     padding: 6px 12px; border-radius: var(--radius-sm); min-height: 34px; text-align: left;
+   }
+   .acct-item:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+-  .acct-id { display: none; }
++  .acct-item { width: 100%; min-height: 42px; }
++  /* shown only for an owner or admin on an authenticated board */
++  #invitePerson { display: none; }
+ 
+   @media (max-width: 1020px) {
+     .board { grid-template-columns: repeat(2, minmax(0,1fr)); }
+@@ -692,21 +708,7 @@
+     }
+     .bell { width: 40px; height: 40px; }
+ 
+-    /* --- account: a sheet under the avatar, replacing the old floating bar --- */
+-    .acct {
+-      position: absolute; top: calc(100% + 10px); right: 0; z-index: 46;
+-      display: none; flex-direction: column; align-items: stretch; gap: 6px;
+-      width: min(268px, calc(100vw - 32px)); padding: 10px;
+-      background: var(--surface-elevated); border: 1px solid var(--line);
+-      border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+-    }
+-    body.acct-open .acct { display: flex; }
+-    .acct-item { width: 100%; min-height: 42px; }
+-    .acct-id {
+-      display: block; padding: 4px 4px 8px; border-bottom: 1px solid var(--line-soft); margin-bottom: 2px;
+-    }
+-    .acct-id .nm { display: block; font-family: var(--f-display); font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.25; }
+-    .acct-id .mt { display: block; font-size: 12px; color: var(--ink-3); margin-top: 2px; }
++    .acct { width: min(272px, calc(100vw - 24px)); }
+ 
+     /* sections become full-bleed bands rather than floating cards */
+     #view-board { gap: 0 !important; }
+@@ -845,6 +847,10 @@
+     .nt { padding: 13px 16px; }
+     @keyframes trayIn { from { opacity: 0; transform: scale(.96) translateY(-6px); } to { opacity: 1; transform: none; } }
+ 
++    /* a right-aligned panel action would sit under the floating button */
++    #view-board .panel-head { flex-direction: column; align-items: stretch; gap: 10px; }
++    #view-board .panel-head .linkbtn { align-self: flex-start; }
++
+     /* --- lists --- */
+     .mtg { flex-wrap: wrap; padding: 13px 0; }
+     .mtg .avarow { order: 3; margin-left: 56px; margin-top: 6px; }
+@@ -936,7 +942,7 @@
+         <button class="avabtn" id="meBtn" aria-label="Your profile" aria-haspopup="menu" aria-expanded="false"></button>
+         <!-- account: inline in the header on desktop, a sheet under the avatar on mobile -->
+         <div class="acct no-print" id="acct">
+-          <button class="acct-item m-only" id="acctMe" type="button">My work</button>
++          <button class="acct-item" id="acctMe" type="button">My work</button>
+           <div id="acctSlot"></div>
+         </div>
+       </div>
+@@ -1018,9 +1024,10 @@
+       <div class="panel-head">
+         <div>
+           <h2>The team</h2>
+-          <p class="sub">Add people, rename them, set weekly capacity. Click a row for their full profile.</p>
++          <p class="sub" id="teamSub">Add people, rename them, set weekly capacity. Click a row for their full profile.</p>
+         </div>
+         <button class="linkbtn" id="addPerson">Add person</button>
++        <button class="linkbtn" id="invitePerson">Invite person</button>
+       </div>
+       <table class="team">
+         <thead><tr><th>Team member</th><th class="num">Open</th><th class="num">Live</th><th class="num">Blocked</th><th class="num">Pages committed / week</th></tr></thead>
+@@ -1348,20 +1355,26 @@
+   #gate .gfoot{text-align:center;font-size:11.5px;color:var(--muted);margin:16px 0 0}
+ 
+   /* ---- account: inline in the header on desktop, inside .acct on mobile ---- */
+-  #whoami{display:none;align-items:center;gap:8px;font:12px "IBM Plex Sans",system-ui,sans-serif;color:var(--navy-2)}
+-  #whoami .site{display:inline-flex;align-items:center;background:var(--paper);border:1px solid var(--line);
+-    border-radius:8px;padding:0 4px 0 10px;min-height:34px;max-width:200px}
+-  #whoami select{border:0;background:transparent;font:600 12.5px "IBM Plex Sans",system-ui,sans-serif;
+-    color:var(--navy);max-width:170px;cursor:pointer;min-height:32px}
+-  #whoami select:focus{outline:none}
+-  #whoami button{border:1px solid var(--line);background:var(--paper);color:var(--navy-2);border-radius:8px;
+-    padding:0 12px;min-height:34px;font-size:12.5px;font-weight:600;cursor:pointer;
+-    font-family:"Archivo",system-ui,sans-serif}
+-  #whoami button:hover{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
+-  #whoami .people{background:var(--teal-soft);border-color:transparent;color:#0B4F4A}
+-  #whoami .role{font-family:"Archivo",system-ui,sans-serif;font-size:10px;letter-spacing:.1em;
+-    text-transform:uppercase;color:var(--muted);font-weight:700;background:var(--cream);
+-    border:1px solid var(--line);border-radius:99px;padding:3px 9px}
++  #whoami{display:none;flex-direction:column;align-items:stretch;gap:6px;width:100%;
++    font:12px "IBM Plex Sans",system-ui,sans-serif;color:var(--navy-2)}
++  #whoami button,#whoami .switch{border:1px solid var(--line);background:var(--paper);color:var(--navy-2);
++    border-radius:8px;padding:0 12px;min-height:42px;font-size:13px;font-weight:600;cursor:pointer;
++    font-family:"Archivo",system-ui,sans-serif;text-align:left;display:flex;align-items:center;width:100%}
++  #whoami button:hover,#whoami .switch:hover{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
++  #whoami .switch{flex-direction:column;align-items:stretch;justify-content:center;gap:1px;
++    padding:6px 12px;min-height:54px;color:var(--muted);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
++  #whoami .switch select{flex:1 1 auto;min-width:0;border:0;background:transparent;cursor:pointer;
++    font:600 13px "IBM Plex Sans",system-ui,sans-serif;letter-spacing:0;text-transform:none;color:var(--navy)}
++  #whoami .switch select:focus{outline:none}
++  /* signing out is not navigation — it sits apart */
++  #whoami .signout{margin-top:4px;border-top:1px solid var(--line);border-radius:0 0 8px 8px;color:var(--navy-2)}
++  #whoami button:focus-visible,#whoami select:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
++
++  /* roster and inventory are project-level: invitation replaces manual adding,
++     and only an owner or admin is offered the inventory editor */
++  body.auth-live #addPerson{display:none!important}
++  body.auth-live.can-admin #invitePerson{display:inline-flex!important}
++  body.auth-live:not(.can-admin) #editInv{display:none!important}
+   /* A viewer can read the board and the report, nothing else. The database
+      refuses their writes regardless — this just stops them being offered. */
+   body.role-viewer #addBtn, body.role-viewer #fabAdd, body.role-viewer [data-add="1"],
+@@ -1369,15 +1382,6 @@
+   body.role-viewer #importPlan, body.role-viewer #editInv, body.role-viewer #addPerson,
+   body.role-viewer #addMeeting, body.role-viewer #xAdd{display:none!important}
+ 
+-  @media (max-width:1180px) and (min-width:701px){ #whoami .role{display:none} }
+-  @media (max-width:700px){
+-    /* inside the avatar sheet: full-width rows, nothing floating over content */
+-    #whoami{flex-direction:column;align-items:stretch;gap:6px;width:100%}
+-    #whoami .site,#whoami select{max-width:none;width:100%}
+-    #whoami .site{min-height:42px}
+-    #whoami button{min-height:42px;text-align:left}
+-    #whoami .role{display:none}   /* the sheet header already states the role */
+-  }
+ </style>
+ <div id="gate" hidden><div class="gwrap">
+   <div class="glock">
+@@ -1606,10 +1610,34 @@
+       r.readAsDataURL(file);
+     });
+   }
++  /* Supabase configured at all — the legacy identity picker may only appear
++     when this is false (an unconfigured local demo). */
++  function live() { return !!(window.PB && PB.live && PB.live()); }
++  /* configured AND signed in with a resolved board key */
++  function authed() { return !!(window.PB && PB.authed && PB.authed()); }
++  function myKey() { return (window.PB && PB.me && PB.me()) || ""; }
++
++  /* Anyone who can still be given work. Inactive profiles stay in state.team
++     so a task assigned years ago still renders the right name. */
+   var teamIds = function () {
++    return Object.keys(state.team).filter(function (id) {
++      var m = state.team[id];
++      return m && m.name && m.active !== false;
++    }).sort(function (a, b) { return String(state.team[a].name).localeCompare(String(state.team[b].name)); });
++  };
++  /* every profile ever, active or not — for resolving historic assignments */
++  var allTeamIds = function () {
+     return Object.keys(state.team).filter(function (id) { return state.team[id] && state.team[id].name; })
+       .sort(function (a, b) { return String(state.team[a].name).localeCompare(String(state.team[b].name)); });
+   };
++
++  /* Postgres error codes are not a user interface. */
++  function saveErr(e, what) {
++    var msg = (window.PB && PB.friendlyError) ? PB.friendlyError(e) : "Couldn't save. Please try again.";
++    if (what === "inventory" && /permission/i.test(msg))
++      return "Only an owner or admin can change the approved page inventory. Discuss changes with the project manager.";
++    return msg;
++  }
+   var plural = function (n, word) { return n + " " + word + (n === 1 && /s$/.test(word) ? "" : ""); };
+ 
+   function toast(msg, ms) {
+@@ -1645,7 +1673,7 @@
+   }
+   function putMeeting(id, body) {
+     state.meetings[id] = body;
+-    if (db) db.doc("meetings/" + id).set(body).catch(function (e) { toast("Couldn't save: " + e.code); });
++    if (db) db.doc("meetings/" + id).set(body).catch(function (e) { toast(saveErr(e, "meeting")); });
+     else localSave();
+     render();
+   }
+@@ -1674,7 +1702,7 @@
+   }
+   function putTask(id, body) {
+     state.tasks[id] = body;
+-    if (db) db.doc("tasks/" + id).set(body).catch(function (e) { toast("Couldn't save: " + e.code); });
++    if (db) db.doc("tasks/" + id).set(body).catch(function (e) { toast(saveErr(e, "task")); });
+     else localSave();
+     render();
+   }
+@@ -1686,7 +1714,7 @@
+   }
+   function putTeam(id, body) {
+     state.team[id] = body;
+-    if (db) db.doc("team/" + id).set(body).catch(function (e) { toast("Couldn't save: " + e.code); });
++    if (db) db.doc("team/" + id).set(body).catch(function (e) { toast(saveErr(e, "team")); });
+     else localSave();
+     render();
+   }
+@@ -1700,13 +1728,13 @@
+     render();
+   }
+   function putInventory() {
+-    if (db) db.doc("meta/inventory").set({ items: state.inventory, label: state.invLabel }).catch(function (e) { toast("Couldn't save: " + e.code); });
++    if (db) db.doc("meta/inventory").set({ items: state.inventory, label: state.invLabel }).catch(function (e) { toast(saveErr(e, "inventory"), 5200); });
+     else localSave();
+     render();
+   }
+   function putBrand() {
+     // set() replaces the whole document, so a removed logo is genuinely gone
+-    if (db) db.doc("meta/brand").set(state.brand).catch(function (e) { toast("Couldn't save: " + e.code); });
++    if (db) db.doc("meta/brand").set(state.brand).catch(function (e) { toast(saveErr(e, "brand")); });
+     else localSave();
+   }
+   function logEvent(text) {
+@@ -2185,6 +2213,20 @@
+   var mwShowReport = false;
+   function renderMe() {
+     if (!state.me || !state.team[state.me]) {
++      /* Signed in: the account decides who you are. Never offer a picker —
++         either the roster row is still being created, or something failed. */
++      if (live()) {
++        var sync = (window.PB.teamSync && PB.teamSync()) || null;
++        $("mwHead").innerHTML = (sync && sync.ok === false)
++          ? '<div class="mw-pick"><h2 style="font-size:18px">We couldn\'t set up your workspace</h2>' +
++            '<p class="sub" style="margin:0;max-width:60ch">' + esc(sync.message || "Your profile could not be created.") +
++            '</p><button class="btn" id="mwRetry" style="align-self:flex-start;margin-top:12px">Try again</button></div>'
++          : '<div class="mw-pick"><h2 style="font-size:18px">Setting up your workspace&hellip;</h2>' +
++            '<p class="sub" style="margin:0;max-width:60ch">Creating your profile on this project. This only happens once.</p></div>';
++        $("mwList").hidden = true; $("mwLog").hidden = true; $("mwPaper").hidden = true;
++        return;
++      }
++      /* Unconfigured local demo only. */
+       var ids = teamIds();
+       $("mwHead").innerHTML = '<div class="mw-pick"><h2 style="font-size:18px">Who are you?</h2>' +
+         '<p class="sub" style="margin:0;max-width:60ch">Pick your name and this becomes your own workspace — just the tasks assigned to you, ' +
+@@ -2226,10 +2268,13 @@
+           '<span class="ov">' + (m.photo ? "Change<br>photo" : "Add<br>photo") + "</span>" +
+         "</button>" +
+         '<input type="file" id="pfFile" accept="image/*" hidden>' +
+-        '<div class="who"><select id="pfWho" aria-label="Who you are">' +
+-          teamIds().map(function (k) {
+-            return "<option value='" + esc(k) + "'" + (k === state.me ? " selected" : "") + ">" + esc(state.team[k].name) + "</option>";
+-          }).join("") + "</select>" +
++        '<div class="who">' +
++          (live()
++            ? '<h2 class="pf-name">' + esc(m.name || "You") + "</h2>"
++            : '<select id="pfWho" aria-label="Who you are">' +
++              allTeamIds().map(function (k) {
++                return "<option value='" + esc(k) + "'" + (k === state.me ? " selected" : "") + ">" + esc(state.team[k].name) + "</option>";
++              }).join("") + "</select>") +
+           '<div class="pf-meta"><span>' + esc(m.role || "Team member") + "</span>" +
+           (m.perWeek ? "<span>&middot;</span><span>" + m.perWeek + " pages a week</span>" : "") +
+           (m.photo ? '<span>&middot;</span><button class="linkbtn tiny" id="pfClear">Remove photo</button>' : "") +
+@@ -2396,7 +2441,9 @@
+         "<td class='num' data-label='Pages'><div class='load'><span class='bar'><i class='" + (s.committed > cap ? "over" : "") +
+         "' style='width:" + pct + "%'></i></span><span>" + s.committed + "/" + cap + "</span></div></td></tr>";
+     }).join("");
+-    $("teamBody").innerHTML = rows || "<tr><td colspan='5' class='empty'>Nobody on the board yet — use “Add person”.</td></tr>";
++    $("teamBody").innerHTML = rows || ("<tr><td colspan='5' class='empty'><b>No active team members yet.</b>" +
++      (live() ? "People appear here automatically after accepting their project invitation."
++              : "Use “Add person” to build the roster.") + "</td></tr>");
+ 
+     var panel = $("profilePanel");
+     if (!state.profile || !state.team[state.profile]) { panel.hidden = true; return; }
+@@ -2627,8 +2674,22 @@
+     var b = $("bell");
+     if (b) root.style.setProperty("--bell-bot", Math.round(b.getBoundingClientRect().bottom) + "px");
+   }
++  /* Scoped so two projects, or two people on one browser, never overwrite
++     each other's last page. Deliberately not the URL hash — #invite= belongs
++     to the invitation flow. */
++  function viewKey() {
++    var s = (window.PB && PB.siteId && PB.siteId()) || "local";
++    return "rmm-view:" + s + ":" + (state.me || "anon");
++  }
++  var VIEWS = { board: 1, team: 1, report: 1, me: 1 };
++  function rememberView(v) { try { if (VIEWS[v]) localStorage.setItem(viewKey(), v); } catch (e) {} }
++  function savedView() {
++    try { var v = localStorage.getItem(viewKey()); return VIEWS[v] ? v : ""; } catch (e) { return ""; }
++  }
++
+   function setView(v) {
+     state.view = v;
++    rememberView(v);
+     $("fabAdd").style.display = v === "board" ? "" : "none";
+     $("repFab").style.display = v === "report" ? "" : "none";
+     setRepMenu(false);
+@@ -2783,7 +2844,9 @@
+     editingPerson = id || newPersonId();
+     if (isNew) m = { name: "", role: "", perWeek: 0 };
+     $("pId").textContent = editingPerson;
+-    $("pHead").textContent = isNew ? "Add someone" : m.name;
++    var self = live() && editingPerson === state.me;
++    $("pRemove").hidden = !!self;      // leaving a project is an admin action, not a self-service one
++    $("pHead").textContent = isNew ? "Add someone" : (self ? "My profile" : m.name);
+     $("pName").value = m.name || "";
+     $("pRole").value = m.role || "";
+     $("pWeek").value = Number(m.perWeek) || 0;
+@@ -2820,6 +2883,11 @@
+     var name = $("pName").value.trim();
+     if (!name) { $("pName").focus(); toast("Give them a name first"); return; }
+     var prev = state.team[editingPerson];
++    // renaming yourself renames the account too, so one name shows everywhere
++    if (live() && editingPerson === state.me && window.PB.saveDisplayName && name !== (prev && prev.name)) {
++      PB.saveDisplayName(name).then(function () { renderAvaBtn(); })
++        .catch(function (e) { toast(saveErr(e, "profile")); });
++    }
+     putTeam(editingPerson, {
+       name: name, role: $("pRole").value.trim(),
+       perWeek: Math.max(0, Number($("pWeek").value) || 0),
+@@ -3531,16 +3599,24 @@
+ 
+   // desktop keeps the account controls inline in the header, so the avatar goes
+   // straight to My work; on mobile it opens the account sheet instead
+-  function acctMobile() { return window.matchMedia("(max-width: 700px)").matches; }
++  // a menu exists once there is an account behind it; the offline demo has none
++  function hasAcctMenu() { return live() || $("acctSlot").children.length > 0; }
+   function setAcct(open) {
+     document.body.classList.toggle("acct-open", !!open);
+     $("meBtn").setAttribute("aria-expanded", open ? "true" : "false");
+   }
+   $("meBtn").addEventListener("click", function (e) {
+-    if (!acctMobile()) { setAcct(false); setView("me"); return; }
++    if (!hasAcctMenu()) { setAcct(false); setView("me"); return; }
+     e.stopPropagation();
+     setAcct(!document.body.classList.contains("acct-open"));
+   });
++  // "My profile" is rendered by the shell, so it is bound by delegation
++  document.addEventListener("click", function (e) {
++    if (!e.target.closest("#myProfile")) return;
++    setAcct(false);
++    if (state.me && state.team[state.me]) openPerson(state.me);
++    else { setView("me"); }
++  });
+   $("acctMe").addEventListener("click", function () { setAcct(false); setView("me"); });
+   document.addEventListener("click", function (e) {
+     if (!document.body.classList.contains("acct-open")) return;
+@@ -3548,7 +3624,7 @@
+     setAcct(false);
+   });
+   document.addEventListener("keydown", function (e) { if (e.key === "Escape") setAcct(false); });
+-  window.addEventListener("resize", function () { if (!acctMobile()) setAcct(false); });
++  window.addEventListener("resize", function () { setAcct(false); });
+   document.addEventListener("click", function (e) {
+     if (e.target.closest("#pfPhoto")) { $("pfFile").click(); return; }
+     if (e.target.closest("#pfClear")) {
+@@ -3566,6 +3642,7 @@
+   });
+   document.addEventListener("change", function (e) {
+     if (e.target.id === "pfWho") {
++      if (live()) { e.target.value = state.me; return; }
+       state.me = e.target.value;
+       try { localStorage.setItem("rmm-board-me", state.me); } catch (err) {}
+       seenKeys = null; state.openTask = null;
+@@ -3664,6 +3741,10 @@
+   $("pClose").addEventListener("click", closePerson);
+   $("pCancel").addEventListener("click", closePerson);
+   $("pSave").addEventListener("click", savePerson);
++  $("invitePerson").addEventListener("click", function () {
++    if (window.ACCESS && ACCESS.open) ACCESS.open();
++    else toast("Invitations are managed from People & access.");
++  });
+   $("pRemove").addEventListener("click", showRemoveBox);
+   $("pRemoveGo").addEventListener("click", removePerson);
+   $("dClose").addEventListener("click", closeDrawer);
+@@ -3707,6 +3788,7 @@
+   });
+   $("dType").addEventListener("change", function () { $("dUnit").value = unitFor($("dWs").value, this.value); });
+   $("mePick").addEventListener("change", function () {
++    if (live()) { $("mePick").value = state.me; return; }
+     state.me = this.value;
+     try { localStorage.setItem("rmm-board-me", state.me); } catch (err) {}
+     seenKeys = null;           // switching person is a fresh slate, not a burst of toasts
+@@ -3717,6 +3799,7 @@
+   $("wsFilter").addEventListener("change", function () { state.wsFilter = this.value; render(); });
+   document.addEventListener("change", function (e) {
+     if (e.target.id !== "mwWho" || !e.target.value) return;
++    if (live()) return;
+     state.me = e.target.value;
+     try { localStorage.setItem("rmm-board-me", state.me); } catch (err) {}
+     seenKeys = null;
+@@ -3870,7 +3953,7 @@
+   if (window.innerWidth <= 700) $("brandbar").classList.add("collapsed");
+   syncRepPanel();
+   render();
+-  setView(state.me ? "me" : "board");
++  setView("board");   // never My Work by default; the saved view is restored after auth resolves
+   syncAppbar();
+   window.addEventListener("resize", syncAppbar);
+   setTimeout(syncAppbar, 600);
+@@ -3895,6 +3978,13 @@
+       return;
+     }
+     $("connText").textContent = "Saving live";
++    // the signed-in account IS the identity, at every render from here on
++    if (PB.me && PB.me()) state.me = PB.me();
++    document.body.classList.add("auth-live");
++    if (PB.isAdmin && PB.isAdmin()) document.body.classList.add("can-admin");
++    var restore = savedView();
++    setView(restore || "board");
++    if (state.view === "me") renderMe();
+     db.collection("tasks").onSnapshot(function (snap) {
+       var next = {}; snap.docs.forEach(function (d) { next[d.id] = clone(d.data()) || {}; });
+       state.tasks = next; render();
+@@ -3977,12 +4067,15 @@
+                         '<span class="mt">' + (role ? role.charAt(0).toUpperCase() + role.slice(1) : "") +
+                         (siteName ? " &middot; " + siteName : "") + "</span>";
+ 
+-    bar.innerHTML = (list.length > 1
+-                      ? '<span class="site"><select id="siteSel" aria-label="Project">' + opts + "</select></span>"
+-                      : '<span class="site"><span>' + siteName + "</span></span>") +
+-                    '<span class="role">' + esc(PB.role() || "") + "</span>" +
++    // one project needs no project control; several get a labelled switcher
++    bar.innerHTML = '<button type="button" id="myProfile">My profile</button>' +
+                     (PB.isAdmin() ? '<button type="button" class="people" id="people">Manage people</button>' : "") +
+-                    '<button type="button" id="signOut" title="' + esc(PB.name() || "") + '">Sign out</button>';
++                    (list.length > 1
++                      ? '<label class="switch" for="siteSel">Switch project' +
++                        '<select id="siteSel" aria-label="Switch project">' + opts + "</select></label>"
++                      : "") +
++                    '<button type="button" class="signout" id="signOut" title="' +
++                    esc(PB.name() || "") + '">Sign out</button>';
+     bar.style.display = "flex";
+     var sel = document.getElementById("siteSel");
+     if (sel) sel.onchange = function () { PB.useSite(this.value); };
+diff --git a/public/sb-adapter.js b/public/sb-adapter.js
+index 0c363fb..ccd4963 100644
+--- a/public/sb-adapter.js
++++ b/public/sb-adapter.js
+@@ -99,8 +99,29 @@
+     };
+   }
+ 
++  /* Postgres speaks in codes; people do not. */
++  function friendlyError(e) {
++    var m = String((e && (e.message || e.error_description || e.details || e.code)) || "");
++    if (/42501|permission denied|row-level security|violates row-level/i.test(m))
++      return "You don't have permission to change that. Ask an owner or admin.";
++    if (/23505|duplicate key|unique constraint/i.test(m))
++      return "That already exists.";
++    if (/JWT|token is expired|invalid claim/i.test(m))
++      return "Your session has expired — sign in again.";
++    if (/Failed to fetch|NetworkError|network/i.test(m))
++      return "Can't reach the server. Check your connection and try again.";
++    return "Couldn't save. Please try again.";
++  }
++
+   var API = {
+     client: function () { return sb; },
++    /* live = Supabase is configured at all; authed = configured AND signed in
++       with a resolved board identity. The legacy identity picker may only
++       appear when live() is false. */
++    live: function () { return !!sb; },
++    authed: function () { return !!(sb && API._session && site && me); },
++    friendlyError: friendlyError,
++    teamSync: function () { return API._teamSync || null; },
+     me: function () { return me || ""; },
+     role: function () { return role; },
+     rank: function (r) { return { owner: 4, admin: 3, editor: 2, viewer: 1 }[r] || 0; },
+@@ -168,9 +189,64 @@
+     logout: async function () { try { await sb.auth.signOut(); } catch (e) {} location.reload(); },
+     useSite: function (id) { localStorage.setItem("rmm-site", id); location.reload(); },
+ 
++    /* The invitation already decided who this person is. Make sure the board
++       has a roster row for them before anything renders, so nobody is ever
++       asked to pick themselves out of a list. Never overwrites an existing
++       profile — it only fills a missing one, or reactivates one they left. */
++    ensureOwnTeamProfile: async function () {
++      if (!sb || !site || !me) return { ok: false, reason: "identity" };
++      var r = await sb.from("team").select("key,body").eq("site", site).eq("key", me).maybeSingle();
++      if (r.error) throw r.error;
++
++      if (!r.data) {
++        var c = await sb.from("team").insert({
++          site: site, key: me,
++          body: { name: API._name || "", role: "", perWeek: 0, phone: "", hours: "", active: true },
++          updated: new Date().toISOString()
++        });
++        if (c.error) throw c.error;
++        return { ok: true, created: true };
++      }
++
++      var body = r.data.body || {};
++      if (body.active === false) {           // they left and have been invited back
++        var back = Object.assign({}, body, { active: true });
++        var u = await sb.from("team").update({ body: back }).eq("site", site).eq("key", me);
++        if (u.error) throw u.error;
++        return { ok: true, reactivated: true };
++      }
++      return { ok: true, existing: true };   // operational detail is theirs, leave it alone
++    },
++
++    /* One visible name, two places to keep it. */
++    saveDisplayName: async function (name) {
++      name = String(name == null ? "" : name).trim();
++      if (!name) throw new Error("A display name is required.");
++      var a = await sb.from("people").update({ name: name }).eq("id", API._session.user.id);
++      if (a.error) throw a.error;
++      API._name = name;
++      var r = await sb.from("team").select("body").eq("site", site).eq("key", me).maybeSingle();
++      var body = Object.assign({}, (r.data && r.data.body) || {}, { name: name });
++      var u = await sb.from("team").update({ body: body }).eq("site", site).eq("key", me);
++      if (u.error) throw u.error;
++      return name;
++    },
++
++    /* Removal keeps history: the profile stays, marked inactive. */
++    deactivateMember: async function (memberKey) {
++      if (!memberKey) return false;
++      var r = await sb.from("team").select("body").eq("site", site).eq("key", memberKey).maybeSingle();
++      if (r.error || !r.data) return false;
++      var body = Object.assign({}, r.data.body || {}, { active: false });
++      var u = await sb.from("team").update({ body: body }).eq("site", site).eq("key", memberKey);
++      return !u.error;
++    },
++
+     connect: async function () {
+       var r = await API.ready();
+       if (!r.ok) return null;
++      try { API._teamSync = await API.ensureOwnTeamProfile(); }
++      catch (e) { API._teamSync = { ok: false, error: e, message: friendlyError(e) }; }
+       return { doc: docRef, collection: collRef };
+     },
+ 
+diff --git a/src/board.html b/src/board.html
+index 4d03700..9bb78cf 100644
+--- a/src/board.html
++++ b/src/board.html
+@@ -419,6 +419,10 @@
+   .pf-photo:hover .ov, .pf-photo:focus-visible .ov { opacity: 1; }
+   .pf-id { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+   .pf-id .who { display: flex; flex-direction: column; gap: 5px; min-width: 210px; }
++  .pf-id .who .pf-name {
++    font-family: var(--f-display); font-size: 19px; font-weight: 700; letter-spacing: -.01em;
++    color: var(--ink); margin: 0;
++  }
+   .pf-id .who select {
+     font: inherit; font-family: var(--f-display); font-size: 19px; font-weight: 700; letter-spacing: -.01em;
+     color: var(--ink); background: transparent; border: 0; border-bottom: 1px dashed var(--line);
+@@ -641,14 +645,26 @@
+   .checks label:hover { color: var(--ink); }
+ 
+   /* ---------- account menu ---------- */
+-  .acct { display: flex; align-items: center; gap: 8px; }
++  .acct {
++    position: absolute; top: calc(100% + 10px); right: 0; z-index: 46;
++    display: none; flex-direction: column; align-items: stretch; gap: 6px;
++    width: min(272px, calc(100vw - 32px)); padding: 10px;
++    background: var(--surface-elevated); border: 1px solid var(--line);
++    border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
++  }
++  body.acct-open .acct { display: flex; }
++  .acct-id { display: block; padding: 4px 4px 9px; border-bottom: 1px solid var(--line-soft); margin-bottom: 2px; }
++  .acct-id .nm { display: block; font-family: var(--f-display); font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.25; }
++  .acct-id .mt { display: block; font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+   .acct-item {
+     border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+     font-family: var(--f-display); font-size: 12.5px; font-weight: 600;
+     padding: 6px 12px; border-radius: var(--radius-sm); min-height: 34px; text-align: left;
+   }
+   .acct-item:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+-  .acct-id { display: none; }
++  .acct-item { width: 100%; min-height: 42px; }
++  /* shown only for an owner or admin on an authenticated board */
++  #invitePerson { display: none; }
+ 
+   @media (max-width: 1020px) {
+     .board { grid-template-columns: repeat(2, minmax(0,1fr)); }
+@@ -680,21 +696,7 @@
+     }
+     .bell { width: 40px; height: 40px; }
+ 
+-    /* --- account: a sheet under the avatar, replacing the old floating bar --- */
+-    .acct {
+-      position: absolute; top: calc(100% + 10px); right: 0; z-index: 46;
+-      display: none; flex-direction: column; align-items: stretch; gap: 6px;
+-      width: min(268px, calc(100vw - 32px)); padding: 10px;
+-      background: var(--surface-elevated); border: 1px solid var(--line);
+-      border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+-    }
+-    body.acct-open .acct { display: flex; }
+-    .acct-item { width: 100%; min-height: 42px; }
+-    .acct-id {
+-      display: block; padding: 4px 4px 8px; border-bottom: 1px solid var(--line-soft); margin-bottom: 2px;
+-    }
+-    .acct-id .nm { display: block; font-family: var(--f-display); font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.25; }
+-    .acct-id .mt { display: block; font-size: 12px; color: var(--ink-3); margin-top: 2px; }
++    .acct { width: min(272px, calc(100vw - 24px)); }
+ 
+     /* sections become full-bleed bands rather than floating cards */
+     #view-board { gap: 0 !important; }
+@@ -833,6 +835,10 @@
+     .nt { padding: 13px 16px; }
+     @keyframes trayIn { from { opacity: 0; transform: scale(.96) translateY(-6px); } to { opacity: 1; transform: none; } }
+ 
++    /* a right-aligned panel action would sit under the floating button */
++    #view-board .panel-head { flex-direction: column; align-items: stretch; gap: 10px; }
++    #view-board .panel-head .linkbtn { align-self: flex-start; }
++
+     /* --- lists --- */
+     .mtg { flex-wrap: wrap; padding: 13px 0; }
+     .mtg .avarow { order: 3; margin-left: 56px; margin-top: 6px; }
+@@ -924,7 +930,7 @@
+         <button class="avabtn" id="meBtn" aria-label="Your profile" aria-haspopup="menu" aria-expanded="false"></button>
+         <!-- account: inline in the header on desktop, a sheet under the avatar on mobile -->
+         <div class="acct no-print" id="acct">
+-          <button class="acct-item m-only" id="acctMe" type="button">My work</button>
++          <button class="acct-item" id="acctMe" type="button">My work</button>
+           <div id="acctSlot"></div>
+         </div>
+       </div>
+@@ -1006,9 +1012,10 @@
+       <div class="panel-head">
+         <div>
+           <h2>The team</h2>
+-          <p class="sub">Add people, rename them, set weekly capacity. Click a row for their full profile.</p>
++          <p class="sub" id="teamSub">Add people, rename them, set weekly capacity. Click a row for their full profile.</p>
+         </div>
+         <button class="linkbtn" id="addPerson">Add person</button>
++        <button class="linkbtn" id="invitePerson">Invite person</button>
+       </div>
+       <table class="team">
+         <thead><tr><th>Team member</th><th class="num">Open</th><th class="num">Live</th><th class="num">Blocked</th><th class="num">Pages committed / week</th></tr></thead>
+@@ -1496,10 +1503,34 @@
+       r.readAsDataURL(file);
+     });
+   }
++  /* Supabase configured at all — the legacy identity picker may only appear
++     when this is false (an unconfigured local demo). */
++  function live() { return !!(window.PB && PB.live && PB.live()); }
++  /* configured AND signed in with a resolved board key */
++  function authed() { return !!(window.PB && PB.authed && PB.authed()); }
++  function myKey() { return (window.PB && PB.me && PB.me()) || ""; }
++
++  /* Anyone who can still be given work. Inactive profiles stay in state.team
++     so a task assigned years ago still renders the right name. */
+   var teamIds = function () {
++    return Object.keys(state.team).filter(function (id) {
++      var m = state.team[id];
++      return m && m.name && m.active !== false;
++    }).sort(function (a, b) { return String(state.team[a].name).localeCompare(String(state.team[b].name)); });
++  };
++  /* every profile ever, active or not — for resolving historic assignments */
++  var allTeamIds = function () {
+     return Object.keys(state.team).filter(function (id) { return state.team[id] && state.team[id].name; })
+       .sort(function (a, b) { return String(state.team[a].name).localeCompare(String(state.team[b].name)); });
+   };
++
++  /* Postgres error codes are not a user interface. */
++  function saveErr(e, what) {
++    var msg = (window.PB && PB.friendlyError) ? PB.friendlyError(e) : "Couldn't save. Please try again.";
++    if (what === "inventory" && /permission/i.test(msg))
++      return "Only an owner or admin can change the approved page inventory. Discuss changes with the project manager.";
++    return msg;
++  }
+   var plural = function (n, word) { return n + " " + word + (n === 1 && /s$/.test(word) ? "" : ""); };
+ 
+   function toast(msg, ms) {
+@@ -1535,7 +1566,7 @@
+   }
+   function putMeeting(id, body) {
+     state.meetings[id] = body;
+-    if (db) db.doc("meetings/" + id).set(body).catch(function (e) { toast("Couldn't save: " + e.code); });
++    if (db) db.doc("meetings/" + id).set(body).catch(function (e) { toast(saveErr(e, "meeting")); });
+     else localSave();
+     render();
+   }
+@@ -1564,7 +1595,7 @@
+   }
+   function putTask(id, body) {
+     state.tasks[id] = body;
+-    if (db) db.doc("tasks/" + id).set(body).catch(function (e) { toast("Couldn't save: " + e.code); });
++    if (db) db.doc("tasks/" + id).set(body).catch(function (e) { toast(saveErr(e, "task")); });
+     else localSave();
+     render();
+   }
+@@ -1576,7 +1607,7 @@
+   }
+   function putTeam(id, body) {
+     state.team[id] = body;
+-    if (db) db.doc("team/" + id).set(body).catch(function (e) { toast("Couldn't save: " + e.code); });
++    if (db) db.doc("team/" + id).set(body).catch(function (e) { toast(saveErr(e, "team")); });
+     else localSave();
+     render();
+   }
+@@ -1590,13 +1621,13 @@
+     render();
+   }
+   function putInventory() {
+-    if (db) db.doc("meta/inventory").set({ items: state.inventory, label: state.invLabel }).catch(function (e) { toast("Couldn't save: " + e.code); });
++    if (db) db.doc("meta/inventory").set({ items: state.inventory, label: state.invLabel }).catch(function (e) { toast(saveErr(e, "inventory"), 5200); });
+     else localSave();
+     render();
+   }
+   function putBrand() {
+     // set() replaces the whole document, so a removed logo is genuinely gone
+-    if (db) db.doc("meta/brand").set(state.brand).catch(function (e) { toast("Couldn't save: " + e.code); });
++    if (db) db.doc("meta/brand").set(state.brand).catch(function (e) { toast(saveErr(e, "brand")); });
+     else localSave();
+   }
+   function logEvent(text) {
+@@ -2075,6 +2106,20 @@
+   var mwShowReport = false;
+   function renderMe() {
+     if (!state.me || !state.team[state.me]) {
++      /* Signed in: the account decides who you are. Never offer a picker —
++         either the roster row is still being created, or something failed. */
++      if (live()) {
++        var sync = (window.PB.teamSync && PB.teamSync()) || null;
++        $("mwHead").innerHTML = (sync && sync.ok === false)
++          ? '<div class="mw-pick"><h2 style="font-size:18px">We couldn\'t set up your workspace</h2>' +
++            '<p class="sub" style="margin:0;max-width:60ch">' + esc(sync.message || "Your profile could not be created.") +
++            '</p><button class="btn" id="mwRetry" style="align-self:flex-start;margin-top:12px">Try again</button></div>'
++          : '<div class="mw-pick"><h2 style="font-size:18px">Setting up your workspace&hellip;</h2>' +
++            '<p class="sub" style="margin:0;max-width:60ch">Creating your profile on this project. This only happens once.</p></div>';
++        $("mwList").hidden = true; $("mwLog").hidden = true; $("mwPaper").hidden = true;
++        return;
++      }
++      /* Unconfigured local demo only. */
+       var ids = teamIds();
+       $("mwHead").innerHTML = '<div class="mw-pick"><h2 style="font-size:18px">Who are you?</h2>' +
+         '<p class="sub" style="margin:0;max-width:60ch">Pick your name and this becomes your own workspace — just the tasks assigned to you, ' +
+@@ -2116,10 +2161,13 @@
+           '<span class="ov">' + (m.photo ? "Change<br>photo" : "Add<br>photo") + "</span>" +
+         "</button>" +
+         '<input type="file" id="pfFile" accept="image/*" hidden>' +
+-        '<div class="who"><select id="pfWho" aria-label="Who you are">' +
+-          teamIds().map(function (k) {
+-            return "<option value='" + esc(k) + "'" + (k === state.me ? " selected" : "") + ">" + esc(state.team[k].name) + "</option>";
+-          }).join("") + "</select>" +
++        '<div class="who">' +
++          (live()
++            ? '<h2 class="pf-name">' + esc(m.name || "You") + "</h2>"
++            : '<select id="pfWho" aria-label="Who you are">' +
++              allTeamIds().map(function (k) {
++                return "<option value='" + esc(k) + "'" + (k === state.me ? " selected" : "") + ">" + esc(state.team[k].name) + "</option>";
++              }).join("") + "</select>") +
+           '<div class="pf-meta"><span>' + esc(m.role || "Team member") + "</span>" +
+           (m.perWeek ? "<span>&middot;</span><span>" + m.perWeek + " pages a week</span>" : "") +
+           (m.photo ? '<span>&middot;</span><button class="linkbtn tiny" id="pfClear">Remove photo</button>' : "") +
+@@ -2286,7 +2334,9 @@
+         "<td class='num' data-label='Pages'><div class='load'><span class='bar'><i class='" + (s.committed > cap ? "over" : "") +
+         "' style='width:" + pct + "%'></i></span><span>" + s.committed + "/" + cap + "</span></div></td></tr>";
+     }).join("");
+-    $("teamBody").innerHTML = rows || "<tr><td colspan='5' class='empty'>Nobody on the board yet — use “Add person”.</td></tr>";
++    $("teamBody").innerHTML = rows || ("<tr><td colspan='5' class='empty'><b>No active team members yet.</b>" +
++      (live() ? "People appear here automatically after accepting their project invitation."
++              : "Use “Add person” to build the roster.") + "</td></tr>");
+ 
+     var panel = $("profilePanel");
+     if (!state.profile || !state.team[state.profile]) { panel.hidden = true; return; }
+@@ -2517,8 +2567,22 @@
+     var b = $("bell");
+     if (b) root.style.setProperty("--bell-bot", Math.round(b.getBoundingClientRect().bottom) + "px");
+   }
++  /* Scoped so two projects, or two people on one browser, never overwrite
++     each other's last page. Deliberately not the URL hash — #invite= belongs
++     to the invitation flow. */
++  function viewKey() {
++    var s = (window.PB && PB.siteId && PB.siteId()) || "local";
++    return "rmm-view:" + s + ":" + (state.me || "anon");
++  }
++  var VIEWS = { board: 1, team: 1, report: 1, me: 1 };
++  function rememberView(v) { try { if (VIEWS[v]) localStorage.setItem(viewKey(), v); } catch (e) {} }
++  function savedView() {
++    try { var v = localStorage.getItem(viewKey()); return VIEWS[v] ? v : ""; } catch (e) { return ""; }
++  }
++
+   function setView(v) {
+     state.view = v;
++    rememberView(v);
+     $("fabAdd").style.display = v === "board" ? "" : "none";
+     $("repFab").style.display = v === "report" ? "" : "none";
+     setRepMenu(false);
+@@ -2673,7 +2737,9 @@
+     editingPerson = id || newPersonId();
+     if (isNew) m = { name: "", role: "", perWeek: 0 };
+     $("pId").textContent = editingPerson;
+-    $("pHead").textContent = isNew ? "Add someone" : m.name;
++    var self = live() && editingPerson === state.me;
++    $("pRemove").hidden = !!self;      // leaving a project is an admin action, not a self-service one
++    $("pHead").textContent = isNew ? "Add someone" : (self ? "My profile" : m.name);
+     $("pName").value = m.name || "";
+     $("pRole").value = m.role || "";
+     $("pWeek").value = Number(m.perWeek) || 0;
+@@ -2710,6 +2776,11 @@
+     var name = $("pName").value.trim();
+     if (!name) { $("pName").focus(); toast("Give them a name first"); return; }
+     var prev = state.team[editingPerson];
++    // renaming yourself renames the account too, so one name shows everywhere
++    if (live() && editingPerson === state.me && window.PB.saveDisplayName && name !== (prev && prev.name)) {
++      PB.saveDisplayName(name).then(function () { renderAvaBtn(); })
++        .catch(function (e) { toast(saveErr(e, "profile")); });
++    }
+     putTeam(editingPerson, {
+       name: name, role: $("pRole").value.trim(),
+       perWeek: Math.max(0, Number($("pWeek").value) || 0),
+@@ -3421,16 +3492,24 @@
+ 
+   // desktop keeps the account controls inline in the header, so the avatar goes
+   // straight to My work; on mobile it opens the account sheet instead
+-  function acctMobile() { return window.matchMedia("(max-width: 700px)").matches; }
++  // a menu exists once there is an account behind it; the offline demo has none
++  function hasAcctMenu() { return live() || $("acctSlot").children.length > 0; }
+   function setAcct(open) {
+     document.body.classList.toggle("acct-open", !!open);
+     $("meBtn").setAttribute("aria-expanded", open ? "true" : "false");
+   }
+   $("meBtn").addEventListener("click", function (e) {
+-    if (!acctMobile()) { setAcct(false); setView("me"); return; }
++    if (!hasAcctMenu()) { setAcct(false); setView("me"); return; }
+     e.stopPropagation();
+     setAcct(!document.body.classList.contains("acct-open"));
+   });
++  // "My profile" is rendered by the shell, so it is bound by delegation
++  document.addEventListener("click", function (e) {
++    if (!e.target.closest("#myProfile")) return;
++    setAcct(false);
++    if (state.me && state.team[state.me]) openPerson(state.me);
++    else { setView("me"); }
++  });
+   $("acctMe").addEventListener("click", function () { setAcct(false); setView("me"); });
+   document.addEventListener("click", function (e) {
+     if (!document.body.classList.contains("acct-open")) return;
+@@ -3438,7 +3517,7 @@
+     setAcct(false);
+   });
+   document.addEventListener("keydown", function (e) { if (e.key === "Escape") setAcct(false); });
+-  window.addEventListener("resize", function () { if (!acctMobile()) setAcct(false); });
++  window.addEventListener("resize", function () { setAcct(false); });
+   document.addEventListener("click", function (e) {
+     if (e.target.closest("#pfPhoto")) { $("pfFile").click(); return; }
+     if (e.target.closest("#pfClear")) {
+@@ -3456,6 +3535,7 @@
+   });
+   document.addEventListener("change", function (e) {
+     if (e.target.id === "pfWho") {
++      if (live()) { e.target.value = state.me; return; }
+       state.me = e.target.value;
+       try { localStorage.setItem("rmm-board-me", state.me); } catch (err) {}
+       seenKeys = null; state.openTask = null;
+@@ -3554,6 +3634,10 @@
+   $("pClose").addEventListener("click", closePerson);
+   $("pCancel").addEventListener("click", closePerson);
+   $("pSave").addEventListener("click", savePerson);
++  $("invitePerson").addEventListener("click", function () {
++    if (window.ACCESS && ACCESS.open) ACCESS.open();
++    else toast("Invitations are managed from People & access.");
++  });
+   $("pRemove").addEventListener("click", showRemoveBox);
+   $("pRemoveGo").addEventListener("click", removePerson);
+   $("dClose").addEventListener("click", closeDrawer);
+@@ -3597,6 +3681,7 @@
+   });
+   $("dType").addEventListener("change", function () { $("dUnit").value = unitFor($("dWs").value, this.value); });
+   $("mePick").addEventListener("change", function () {
++    if (live()) { $("mePick").value = state.me; return; }
+     state.me = this.value;
+     try { localStorage.setItem("rmm-board-me", state.me); } catch (err) {}
+     seenKeys = null;           // switching person is a fresh slate, not a burst of toasts
+@@ -3607,6 +3692,7 @@
+   $("wsFilter").addEventListener("change", function () { state.wsFilter = this.value; render(); });
+   document.addEventListener("change", function (e) {
+     if (e.target.id !== "mwWho" || !e.target.value) return;
++    if (live()) return;
+     state.me = e.target.value;
+     try { localStorage.setItem("rmm-board-me", state.me); } catch (err) {}
+     seenKeys = null;
+@@ -3760,7 +3846,7 @@
+   if (window.innerWidth <= 700) $("brandbar").classList.add("collapsed");
+   syncRepPanel();
+   render();
+-  setView(state.me ? "me" : "board");
++  setView("board");   // never My Work by default; the saved view is restored after auth resolves
+   syncAppbar();
+   window.addEventListener("resize", syncAppbar);
+   setTimeout(syncAppbar, 600);
+@@ -3778,6 +3864,13 @@
+       return;
+     }
+     $("connText").textContent = "Saving live";
++    // the signed-in account IS the identity, at every render from here on
++    if (PB.me && PB.me()) state.me = PB.me();
++    document.body.classList.add("auth-live");
++    if (PB.isAdmin && PB.isAdmin()) document.body.classList.add("can-admin");
++    var restore = savedView();
++    setView(restore || "board");
++    if (state.view === "me") renderMe();
+     db.collection("tasks").onSnapshot(function (snap) {
+       var next = {}; snap.docs.forEach(function (d) { next[d.id] = clone(d.data()) || {}; });
+       state.tasks = next; render();
+diff --git a/test/board.test.js b/test/board.test.js
+index 75bdba9..04cbced 100644
+--- a/test/board.test.js
++++ b/test/board.test.js
+@@ -30,6 +30,7 @@ await ctx.route('**/supabase.js',r=>r.fulfill({status:200,contentType:'text/java
+ await ctx.addInitScript(s=>{if(!localStorage.getItem('mocksb'))localStorage.setItem('mocksb',JSON.stringify(s));},seed);
+ const p=await ctx.newPage();const errs=[];p.on('pageerror',e=>errs.push(e.message));
+ const rows=c=>p.evaluate(k=>JSON.parse(localStorage.getItem('mocksb'))[k],c);
++const openAcct=async()=>{if(!(await p.evaluate(()=>document.body.classList.contains('acct-open')))){await p.click('#meBtn');await p.waitForTimeout(250);}};
+ 
+ await p.goto('http://localhost:8896/');await p.waitForTimeout(900);
+ t('sign-in gate blocks the board', await p.evaluate(()=>{const g=document.getElementById('gate');return g&&!g.hidden;}));
+@@ -59,13 +60,13 @@ await p.reload();await p.waitForTimeout(1600);
+ t('reload keeps the session', await p.evaluate(()=>{const g=document.getElementById('gate');return (!g||g.hidden)&&document.querySelectorAll('.card').length===3;}));
+ t('the edit survived the reload', await rows('tasks').then(r=>r.find(x=>x.key==='RMM-004').body.status==='review'));
+ 
+-await p.selectOption('#siteSel','s2');await p.waitForTimeout(1800);
++await openAcct();await p.selectOption('#siteSel','s2');await p.waitForTimeout(1800);
+ t('switching project loads only that tenant', await p.evaluate(()=>document.querySelectorAll('.card').length===1&&document.body.textContent.includes('GBP rebuild')));
+-await p.selectOption('#siteSel','s1');await p.waitForTimeout(1800);
++await openAcct();await p.selectOption('#siteSel','s1');await p.waitForTimeout(1800);
+ t('switching back restores the first project', await p.evaluate(()=>document.querySelectorAll('.card').length===3));
+ 
+ // second account: privacy the other way round
+-await p.click('#signOut');await p.waitForTimeout(1400);
++await openAcct();await p.click('#signOut');await p.waitForTimeout(1400);
+ await p.fill('#gEmail','dev@growwithmh.com');await p.fill('#gPass','pw12345678');await p.click('#gBtn');await p.waitForTimeout(1800);
+ t('a second member signs in as themselves', await p.evaluate(()=>localStorage.getItem('rmm-board-me')==='DEV-2'));
+ t('they cannot see the other member\'s private notes', !(await p.evaluate(()=>document.body.textContent.includes('mine only'))));
+diff --git a/test/identity.test.js b/test/identity.test.js
+new file mode 100644
+index 0000000..1e8b998
+--- /dev/null
++++ b/test/identity.test.js
+@@ -0,0 +1,195 @@
++/* Authenticated identity, roster auto-sync, view persistence, profile menu and
++   inventory permission UX. Runs against the stand-in Supabase client, whose
++   policy emulation mirrors supabase/schema.sql. */
++const {chromium}=require('playwright');const fs=require('fs');const http=require('http');const path=require('path');
++const ROOT=path.join(__dirname,'..');
++const ok=[],bad=[];const t=(n,c)=>{(c?ok:bad).push(n);console.log((c?'PASS  ':'FAIL  ')+n);};
++const MOCK=fs.readFileSync(path.join(__dirname,'mock-supabase.js'),'utf8');
++const T={'.html':'text/html','.js':'text/javascript'};
++const srv=http.createServer((q,s)=>{let f=path.join(ROOT,'public',q.url==='/'?'index.html':q.url.split('?')[0]);
++ fs.readFile(f,(e,d)=>{if(e){s.writeHead(404);s.end();}else{s.writeHead(200,{'Content-Type':T[path.extname(f)]||'text/plain'});s.end(d);}});});
++const D=n=>new Date(Date.now()+n*86400000).toISOString().slice(0,10);
++const R=(site,key,body)=>({id:'x'+key+site,site,key,body});
++
++// owner (two projects), editor, viewer, plus an invited newcomer with no roster row
++const seed=()=>({
++ people:[{id:'u1',email:'owner@g.com',password:'pw12345678',name:'Mehedi',member:'MH-1'},
++         {id:'u2',email:'editor@g.com',password:'pw12345678',name:'Sam Editor',member:'SEO-1'},
++         {id:'u3',email:'viewer@g.com',password:'pw12345678',name:'RMM Client',member:'CL-1'},
++         {id:'u4',email:'admin@g.com',password:'pw12345678',name:'Pat Admin',member:'PM-1'}],
++ sites:[{id:'s1',name:'RMM Builders Ltd'},{id:'s2',name:'South Asian Construction'}],
++ memberships:[{site:'s1',person:'u1',role:'owner'},{site:'s2',person:'u1',role:'admin'},
++              {site:'s1',person:'u2',role:'editor'},{site:'s1',person:'u3',role:'viewer'},
++              {site:'s1',person:'u4',role:'admin'}],
++ invites:[],
++ tasks:[R('s1','RMM-001',{title:'Service silo build',ws:'web',type:'service',owner:'SEO-1',status:'writing',planned:12,done:5,unit:'pages',blocked:false,due:D(4)}),
++        R('s1','RMM-002',{title:'Area hubs',ws:'web',type:'area',owner:'MH-1',status:'backlog',planned:10,done:0,unit:'pages',helpers:['SEO-1'],blocked:false}),
++        R('s1','RMM-003',{title:'Legacy citation run',ws:'offpage',type:'citations',owner:'GONE-1',status:'live',planned:5,done:5,unit:'citations',blocked:false})],
++ // GONE-1 is a departed member: profile kept, marked inactive
++ team:[R('s1','MH-1',{name:'Mehedi',role:'Owner / SEO',perWeek:12,active:true}),
++       R('s1','SEO-1',{name:'Sam Editor',role:'SEO Specialist',perWeek:8,active:true}),
++       R('s1','CL-1',{name:'RMM Client',role:'',perWeek:0,active:true}),
++       R('s1','GONE-1',{name:'Departed Dana',role:'Content Writer',perWeek:0,active:false}),
++       R('s2','MH-1',{name:'Mehedi',role:'Owner',perWeek:5,active:true})],
++ meta:[R('s1','inventory',{items:[{label:'Core pages',target:7}],label:'Approved page inventory'}),
++       R('s1','brand',{agency:'GrowwithMH',client:'RMM Builders Ltd',accent:'#0F6F69'})]});
++
++(async()=>{
++await new Promise(r=>srv.listen(8887,r));
++const b=await chromium.launch(fs.existsSync('/opt/pw-browsers/chromium')?{executablePath:'/opt/pw-browsers/chromium'}:{});
++const ctx=await b.newContext({viewport:{width:1320,height:1000}});
++await ctx.route('**fonts.g**',r=>r.abort());
++await ctx.route('**/supabase.js',r=>r.fulfill({status:200,contentType:'text/javascript',body:MOCK}));
++await ctx.addInitScript(s=>{if(!localStorage.getItem('mocksb'))localStorage.setItem('mocksb',JSON.stringify(s));},seed());
++const p=await ctx.newPage();const errs=[];p.on('pageerror',e=>errs.push(e.message));
++const rows=c=>p.evaluate(k=>JSON.parse(localStorage.getItem('mocksb'))[k]||[],c);
++const openAcct=async()=>{if(!(await p.evaluate(()=>document.body.classList.contains('acct-open')))){await p.click('#meBtn');await p.waitForTimeout(250);}};
++const signIn=async(em)=>{await p.goto('http://localhost:8887/');await p.waitForTimeout(600);
++  if(await p.evaluate(()=>{const g=document.getElementById('gate');return g&&!g.hidden;})){
++    await p.fill('#gEmail',em);await p.fill('#gPass','pw12345678');await p.click('#gBtn');await p.waitForTimeout(1700);}};
++const signOut=async()=>{await openAcct();await p.click('#signOut');await p.waitForTimeout(1300);};
++
++/* ---------- identity ---------- */
++await signIn('owner@g.com');
++t('1. authenticated PB.me() becomes state.me', await p.evaluate(()=>PB.me()==='MH-1'&&localStorage.getItem('rmm-board-me')==='MH-1'));
++await openAcct();await p.click('#acctMe');await p.waitForTimeout(600);
++t('3. "Who are you?" is absent in authenticated mode', await p.evaluate(()=>
++  !/Who are you/.test(document.getElementById('mwHead').innerText)&&!document.getElementById('mwWho')));
++t('2. signed-in user cannot select another identity', await p.evaluate(()=>
++  !document.getElementById('mwWho')&&!document.getElementById('pfWho')&&!!document.querySelector('.pf-name')));
++t('2b. forcing the hidden legacy picker cannot move identity', await p.evaluate(()=>{
++  const s=document.getElementById('mePick'); if(!s) return true;
++  s.value='SEO-1'; s.dispatchEvent(new Event('change',{bubbles:true}));
++  return PB.me()==='MH-1';}));
++
++/* ---------- My Work content ---------- */
++t('7. assigned tasks appear in My Work', await p.evaluate(()=>document.body.textContent.includes('Area hubs')));
++await signOut();
++await signIn('editor@g.com');
++await openAcct();await p.click('#acctMe');await p.waitForTimeout(700);
++t('8. helper tasks appear in My Work', await p.evaluate(()=>document.body.textContent.includes('Area hubs')));
++t('7b. their own assignment appears too', await p.evaluate(()=>document.body.textContent.includes('Service silo')));
++
++/* ---------- roster auto-sync for a brand-new member ---------- */
++await signOut();
++await signIn('admin@g.com');
++await p.waitForTimeout(900);
++const team=await rows('team');const mine=team.find(r=>r.key==='PM-1'&&r.site==='s1');
++t('4. new member automatically gets a team profile', !!mine);
++t('5. team profile key equals people.member', !!mine&&mine.key==='PM-1');
++t('6. team profile name begins from people.name', !!mine&&mine.body.name==='Pat Admin');
++t('6b. auto-created profile is active with no invented job title', !!mine&&mine.body.active===true&&mine.body.role==='');
++await openAcct();await p.click('#acctMe');await p.waitForTimeout(700);
++t('9. no assigned work shows an empty state, not an identity picker', await p.evaluate(()=>{
++  const head=document.getElementById('mwHead').innerText;
++  return !/Who are you/.test(head)&&!document.getElementById('mwWho')&&!!document.querySelector('.pf-name');}));
++
++/* ---------- profile menu by role ---------- */
++t('15/16. owner and admin see Manage people', await p.evaluate(()=>!!document.getElementById('people')));
++t('20. all roles see My profile', await p.evaluate(()=>!!document.getElementById('myProfile')));
++t('18. single-project user gets no standalone project item', await p.evaluate(()=>
++  !document.getElementById('siteSel')&&!/Switch project/.test(document.getElementById('whoami').textContent)));
++await signOut();
++await signIn('owner@g.com');await openAcct();
++t('19. multi-project user gets a Switch project control', await p.evaluate(()=>
++  !!document.getElementById('siteSel')&&/Switch project/.test(document.getElementById('whoami').textContent)));
++await signOut();
++await signIn('editor@g.com');await openAcct();
++t('17. editor does not see Manage people', await p.evaluate(()=>!document.getElementById('people')));
++t('17b. editor still sees My work and My profile', await p.evaluate(()=>
++  !!document.getElementById('acctMe')&&!!document.getElementById('myProfile')));
++
++/* ---------- inventory permission UX ---------- */
++t('25. editor gets no inventory Edit control', await p.evaluate(()=>{
++  const e=document.getElementById('editInv');return !e||getComputedStyle(e).display==='none';}));
++t('28. a forced editor inventory save explains itself, never "42501"', await p.evaluate(async()=>{
++  const before=document.getElementById('toast').textContent;
++  const r=await PB.client().from('meta').upsert({site:PB.siteId(),key:'inventory',body:{items:[{label:'Hacked',target:1}]}});
++  const msg=r.error?PB.friendlyError(r.error):'';
++  return /permission/i.test(msg)&&!/42501/.test(msg)&&before!==undefined;}));
++await signOut();
++await signIn('viewer@g.com');
++t('26. viewer gets no inventory Edit control', await p.evaluate(()=>{
++  const e=document.getElementById('editInv');return !e||getComputedStyle(e).display==='none';}));
++await signOut();
++await signIn('owner@g.com');
++t('27. owner can edit inventory', await p.evaluate(()=>{
++  const e=document.getElementById('editInv');return !!e&&getComputedStyle(e).display!=='none';}));
++
++/* ---------- assignment pickers respect active membership ---------- */
++await p.evaluate(()=>{const c=[...document.querySelectorAll('.card')].find(e=>e.textContent.includes('Area hubs'));c.click();});
++await p.waitForTimeout(500);
++const owners=await p.evaluate(()=>[...document.getElementById('dOwner').options].map(o=>o.value));
++t('29. active users appear in the owner picker', owners.includes('MH-1')&&owners.includes('SEO-1'));
++t('30. inactive users do not appear in the owner picker', !owners.includes('GONE-1'));
++await p.click('#dCancel');await p.waitForTimeout(300);
++t('31. a historic task still shows the departed person\'s name', await p.evaluate(()=>{
++  document.querySelector('.tabs button[data-view="board"]').click();
++  return JSON.parse(localStorage.getItem('mocksb')).team.some(r=>r.key==='GONE-1'&&r.body.name==='Departed Dana');}));
++
++/* ---------- rename ---------- */
++await openAcct();await p.click('#myProfile');await p.waitForTimeout(600);
++await p.fill('#pName','Md. Mehedi Hassan');await p.click('#pSave');await p.waitForTimeout(900);
++t('21/22. rename updates people.name', await rows('people').then(r=>r.find(x=>x.id==='u1').name==='Md. Mehedi Hassan'));
++t('23. rename updates their own team profile name', await rows('team').then(r=>
++  r.find(x=>x.key==='MH-1'&&x.site==='s1').body.name==='Md. Mehedi Hassan'));
++t('24. the member key is unchanged', await p.evaluate(()=>PB.me()==='MH-1'));
++t('8b. the job title was not overwritten by the membership role', await rows('team').then(r=>
++  r.find(x=>x.key==='MH-1'&&x.site==='s1').body.role==='Owner / SEO'));
++
++/* ---------- team page copy ---------- */
++t('10a. live mode replaces manual Add person with Invite person', await p.evaluate(()=>{
++  document.querySelector('.tabs button[data-view="team"]').click();
++  const add=document.getElementById('addPerson'), inv=document.getElementById('invitePerson');
++  return getComputedStyle(add).display==='none'&&getComputedStyle(inv).display!=='none';}));
++
++/* ---------- removal keeps history, rejoining restores the profile ---------- */
++await openAcct();await p.click('#people');await p.waitForTimeout(800);
++await p.evaluate(()=>{const r=[...document.querySelectorAll('#acc .ac-row')].find(x=>/SEO-1/.test(x.textContent));
++  r.querySelector('.ac-mini').click();});
++await p.waitForTimeout(1100);
++t('32. removal marks the team profile inactive', await rows('team').then(r=>
++  r.find(x=>x.key==='SEO-1'&&x.site==='s1').body.active===false));
++t('32b. the profile itself is kept, not deleted', await rows('team').then(r=>
++  !!r.find(x=>x.key==='SEO-1'&&x.site==='s1')));
++await p.evaluate(()=>{const g=document.getElementById('acc');if(g)g.remove();});
++// they are invited back: membership returns, and the next sign-in reactivates them
++await p.evaluate(()=>{const d=JSON.parse(localStorage.getItem('mocksb'));
++  d.memberships.push({site:'s1',person:'u2',role:'editor'});localStorage.setItem('mocksb',JSON.stringify(d));});
++await signOut();
++await signIn('editor@g.com');await p.waitForTimeout(900);
++t('33. rejoining reactivates the team profile', await rows('team').then(r=>
++  r.find(x=>x.key==='SEO-1'&&x.site==='s1').body.active===true));
++t('33b. their operational detail survived the round trip', await rows('team').then(r=>
++  r.find(x=>x.key==='SEO-1'&&x.site==='s1').body.role==='SEO Specialist'));
++await signOut();
++await signIn('owner@g.com');
++
++/* ---------- view persistence ---------- */
++for (const [view,marker] of [['team','The team'],['report','SEO progress report'],['board','APPROVED PAGE INVENTORY'.toLowerCase()]]) {
++  await p.evaluate(v=>document.querySelector('.tabs button[data-view="'+v+'"]').click(),view);
++  await p.waitForTimeout(500);
++  await p.reload();await p.waitForTimeout(1700);
++  const on=await p.evaluate(v=>document.querySelector('.tabs button[data-view="'+v+'"]').getAttribute('aria-selected')==='true',view);
++  t('10-12. refreshing '+view+' restores '+view, on);
++}
++await openAcct();await p.click('#acctMe');await p.waitForTimeout(500);
++await p.reload();await p.waitForTimeout(1700);
++t('13. refreshing My Work restores My Work', await p.evaluate(()=>!document.getElementById('view-me').hidden));
++t('14. the saved view is scoped per project and person', await p.evaluate(()=>
++  Object.keys(localStorage).some(k=>/^rmm-view:s1:MH-1$/.test(k))));
++
++/* ---------- privacy ---------- */
++t('34. My Work privacy holds: another key is unreadable', await p.evaluate(async()=>{
++  const r=await PB.client().from('personal').select('key,body').eq('site',PB.siteId()).eq('key','SEO-1');
++  return !r.error&&(r.data||[]).length===0;}));
++t('35. the account cannot be switched to another identity', await p.evaluate(()=>{
++  try{ PB.client(); }catch(e){}
++  return PB.me()==='MH-1';}));
++
++t('no JS errors', errs.length===0);
++if(errs.length)console.log('   ',errs.slice(0,4).join(' | '));
++await b.close();srv.close();
++console.log('\n'+ok.length+' passed, '+bad.length+' failed'+(bad.length?': '+bad.join(', '):''));
++process.exit(bad.length?1:0);
++})();
+diff --git a/test/mock-supabase.js b/test/mock-supabase.js
+index 349986e..2e0d4fc 100644
+--- a/test/mock-supabase.js
++++ b/test/mock-supabase.js
+@@ -82,6 +82,8 @@
+   };
+   // returns null when allowed, or a message when the policy refuses
+   Client.prototype._refuse = function (t, row, op) {
++    // people: you may only edit your own row (mirrors the people_self policy)
++    if (t === "people") return row.id === this._uid() ? null : "blocked";
+     var r = this._rank(row.site !== undefined ? row.site : row.id);
+     if (t === "invites") {
+       if (r < RANK.admin) return "new row violates row-level security policy for table \"invites\"";
+diff --git a/test/roles.test.js b/test/roles.test.js
+index a0ec071..1bd7103 100644
+--- a/test/roles.test.js
++++ b/test/roles.test.js
+@@ -31,8 +31,9 @@ const signIn=async(em)=>{await p.goto('http://localhost:8894/');await p.waitForT
+ 
+ // ---------- owner ----------
+ await signIn('mehedi@growwithmh.com');
+-t('owner sees their role in the corner', await p.evaluate(()=>document.querySelector('#whoami .role').textContent==='owner'));
++t('owner sees their role in the account menu', await p.evaluate(()=>/^Owner/.test(document.querySelector('#acctWho .mt').textContent)));
+ t('owner gets the People button', await p.evaluate(()=>!!document.getElementById('people')));
++await p.click('#meBtn');await p.waitForTimeout(250);
+ await p.click('#people');await p.waitForTimeout(700);
+ t('access panel lists everyone on the project', await p.evaluate(()=>document.querySelectorAll('#acc .ac-row .ac-nm').length>=3));
+ t('owner may grant every role', await p.evaluate(()=>document.querySelector('#acc .ac-row select').options.length===4));
+@@ -68,7 +69,7 @@ await p.fill('#suEmail','new@growwithmh.com');await p.click('#suBtn');await p.wa
+ t('the right email creates the account and lands on the board', await p.evaluate(()=>{
+   const g=document.getElementById('gate');return (!g||g.hidden)&&document.querySelectorAll('.card').length===1;}));
+ t('they arrive with the invited role and key', await p.evaluate(()=>
+-  localStorage.getItem('rmm-board-me')==='SEO-2'&&document.querySelector('#whoami .role').textContent==='editor'));
++  localStorage.getItem('rmm-board-me')==='SEO-2'&&/^Editor/.test(document.querySelector('#acctWho .mt').textContent)));
+ t('the invitation is spent', await rows('invites').then(i=>!!i[0].accepted));
+ t('an editor gets no People button', await p.evaluate(()=>!document.getElementById('people')));
+ 
+-- 
+2.43.0
+
