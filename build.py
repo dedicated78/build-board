@@ -14,7 +14,7 @@ d = SRC.read_text(encoding="utf-8")
 head = """<style>
   /* base reset the artifact runtime used to inject — the app depends on it */
   html{color-scheme:light}
-  body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#F2F4F5;color:#14181B}
+  body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#F7F3EA;color:#010B24}
   img{max-width:100%}
   [hidden]{display:none!important}
   *,*::before,*::after{box-sizing:border-box}
@@ -24,42 +24,80 @@ head = """<style>
 <script src="sb-adapter.js"></script>
 <script src="access.js"></script>
 <style>
-  #gate{position:fixed;inset:0;z-index:9999;background:#F2F4F5;display:flex;align-items:center;justify-content:center;padding:24px}
-  #gate .gcard{background:#fff;border:1px solid #D6DCDF;border-radius:12px;padding:28px;width:100%;max-width:360px;
-    box-shadow:0 1px 2px rgba(20,24,27,.06),0 6px 18px rgba(20,24,27,.05);font-family:"IBM Plex Sans",system-ui,sans-serif}
-  #gate h1{font-family:"Archivo",system-ui,sans-serif;font-size:19px;margin:0 0 4px;color:#14181B}
-  #gate p{margin:0 0 20px;font-size:13px;color:#5A6469;line-height:1.5}
-  #gate label{display:block;font-size:12px;font-weight:600;color:#5A6469;margin:0 0 5px}
-  #gate input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #D6DCDF;border-radius:8px;
-    font:14px/1.4 "IBM Plex Sans",system-ui,sans-serif;margin:0 0 14px;background:#fff;color:#14181B}
-  #gate input:focus{outline:none;border-color:#12615E;box-shadow:0 0 0 3px #DCEBEA}
-  #gate button{width:100%;padding:11px;border:0;border-radius:8px;background:#12615E;color:#fff;font-weight:600;
-    font-size:14px;cursor:pointer;font-family:"IBM Plex Sans",system-ui,sans-serif}
+  /* the app's tokens, repeated here because this shell renders before it */
+  #gate, #whoami, .acct { --cream:#F7F3EA; --paper:#FFFDF8; --navy:#010B24; --navy-2:#56606F;
+    --muted:#646D7E; --line:#E5DED2; --teal:#0F6F69; --teal-hover:#218F88; --teal-soft:#E3F3F1; --red:#A83229; }
+
+  /* ---- authentication ---- */
+  #gate{position:fixed;inset:0;z-index:9999;background:var(--cream);display:flex;align-items:center;
+    justify-content:center;padding:24px 20px;overflow-y:auto}
+  #gate .gwrap{width:100%;max-width:392px;margin:auto}
+  #gate .glock{text-align:center;margin:0 0 22px}
+  #gate .glock .eb{font-family:"Archivo",system-ui,sans-serif;font-size:10.5px;font-weight:700;
+    letter-spacing:.15em;text-transform:uppercase;color:var(--navy-2)}
+  #gate .glock .nm{font-family:"Archivo",system-ui,sans-serif;font-size:27px;font-weight:700;
+    letter-spacing:-.02em;color:var(--navy);line-height:1.15;margin-top:3px}
+  #gate .glock .sb{font-size:13px;color:var(--muted);margin-top:5px}
+  #gate .gcard{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:26px 24px;
+    box-shadow:0 1px 2px rgba(1,11,36,.05),0 18px 48px rgba(1,11,36,.10);
+    font-family:"IBM Plex Sans",system-ui,sans-serif}
+  #gate h1{font-family:"Archivo",system-ui,sans-serif;font-size:18px;margin:0 0 4px;color:var(--navy)}
+  #gate p{margin:0 0 20px;font-size:13px;color:var(--navy-2);line-height:1.55}
+  #gate label{display:block;font-family:"Archivo",system-ui,sans-serif;font-size:10.5px;font-weight:600;
+    letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+  #gate input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid var(--line);border-radius:10px;
+    font:16px/1.4 "IBM Plex Sans",system-ui,sans-serif;margin:0 0 15px;background:#fff;color:var(--navy);min-height:46px}
+  #gate input:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-soft)}
+  #gate button{width:100%;padding:12px;border:0;border-radius:10px;background:var(--teal);color:#fff;font-weight:600;
+    font-size:15px;cursor:pointer;font-family:"Archivo",system-ui,sans-serif;min-height:48px}
+  #gate button:hover{background:var(--teal-hover)}
   #gate button:disabled{opacity:.6;cursor:default}
-  #gate .err{font-size:12.5px;color:#B5342B;margin:12px 0 0;line-height:1.5;display:none}
+  #gate button:focus-visible,#gate input:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+  #gate .err{font-size:12.5px;color:var(--red);margin:12px 0 0;line-height:1.5;display:none}
   #gate .err.on{display:block}
-  #whoami{position:fixed;left:12px;bottom:12px;z-index:600;display:none;align-items:center;gap:8px;background:#fff;
-    border:1px solid #D6DCDF;border-radius:999px;padding:5px 6px 5px 12px;font:12px "IBM Plex Sans",system-ui,sans-serif;
-    color:#5A6469;box-shadow:0 1px 2px rgba(20,24,27,.06),0 6px 18px rgba(20,24,27,.05)}
-  #whoami select{border:0;background:transparent;font:600 12px "IBM Plex Sans",system-ui,sans-serif;color:#14181B;
-    max-width:150px;cursor:pointer}
+  #gate .gfoot{text-align:center;font-size:11.5px;color:var(--muted);margin:16px 0 0}
+
+  /* ---- account: inline in the header on desktop, inside .acct on mobile ---- */
+  #whoami{display:none;align-items:center;gap:8px;font:12px "IBM Plex Sans",system-ui,sans-serif;color:var(--navy-2)}
+  #whoami .site{display:inline-flex;align-items:center;background:var(--paper);border:1px solid var(--line);
+    border-radius:8px;padding:0 4px 0 10px;min-height:34px;max-width:200px}
+  #whoami select{border:0;background:transparent;font:600 12.5px "IBM Plex Sans",system-ui,sans-serif;
+    color:var(--navy);max-width:170px;cursor:pointer;min-height:32px}
   #whoami select:focus{outline:none}
-  #whoami button{border:0;background:#E9ECEE;color:#5A6469;border-radius:999px;padding:5px 11px;font-size:12px;
-    font-weight:600;cursor:pointer;font-family:inherit}
-  body.authed{padding-bottom:56px}
-  #whoami .people{background:#DCEBEA;color:#0F4F4C}
-  #whoami .role{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:#8A9399;font-weight:700}
+  #whoami button{border:1px solid var(--line);background:var(--paper);color:var(--navy-2);border-radius:8px;
+    padding:0 12px;min-height:34px;font-size:12.5px;font-weight:600;cursor:pointer;
+    font-family:"Archivo",system-ui,sans-serif}
+  #whoami button:hover{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
+  #whoami .people{background:var(--teal-soft);border-color:transparent;color:#0B4F4A}
+  #whoami .role{font-family:"Archivo",system-ui,sans-serif;font-size:10px;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--muted);font-weight:700;background:var(--cream);
+    border:1px solid var(--line);border-radius:99px;padding:3px 9px}
   /* A viewer can read the board and the report, nothing else. The database
      refuses their writes regardless — this just stops them being offered. */
   body.role-viewer #addBtn, body.role-viewer #fabAdd, body.role-viewer [data-add="1"],
   body.role-viewer #dSave, body.role-viewer #dDelete, body.role-viewer #dApprove,
   body.role-viewer #importPlan, body.role-viewer #editInv, body.role-viewer #addPerson,
   body.role-viewer #addMeeting, body.role-viewer #xAdd{display:none!important}
-  @media (max-width:760px){ #whoami{left:10px;bottom:10px;padding:4px 5px 4px 10px} #whoami select{max-width:96px} }
+
+  @media (max-width:1180px) and (min-width:701px){ #whoami .role{display:none} }
+  @media (max-width:700px){
+    /* inside the avatar sheet: full-width rows, nothing floating over content */
+    #whoami{flex-direction:column;align-items:stretch;gap:6px;width:100%}
+    #whoami .site,#whoami select{max-width:none;width:100%}
+    #whoami .site{min-height:42px}
+    #whoami button{min-height:42px;text-align:left}
+    #whoami .role{display:none}   /* the sheet header already states the role */
+  }
 </style>
-<div id="gate" hidden><div class="gcard">
-  <h1>RMM Build Board</h1>
-  <p>Sign in with the account your admin created for you.</p>
+<div id="gate" hidden><div class="gwrap">
+  <div class="glock">
+    <div class="eb">RMM Builders Ltd</div>
+    <div class="nm">Build Board</div>
+    <div class="sb">Secure project workspace</div>
+  </div>
+  <div class="gcard">
+  <h1>Sign in</h1>
+  <p>Use the account your admin created for you.</p>
   <form id="gateForm">
     <label for="gEmail">Email</label>
     <input id="gEmail" type="email" autocomplete="username" required>
@@ -68,8 +106,9 @@ head = """<style>
     <button type="submit" id="gBtn">Sign in</button>
     <p class="err" id="gErr"></p>
   </form>
+  </div>
+  <p class="gfoot">Access is by invitation only.</p>
 </div></div>
-<div id="whoami"></div>
 """
 app = d.index("<script>\n")
 d = d[:app] + head + d[app:]
@@ -94,20 +133,43 @@ boot = """
 /* ================= sign-in gate ================= */
 (function () {
   var gate = document.getElementById("gate");
-  var bar  = document.getElementById("whoami");
+  // the account controls live in the header cluster: inline on desktop, and
+  // inside the avatar sheet on mobile. Never floating over the content.
+  var slot = document.getElementById("acctSlot");
+  var bar  = document.createElement("div");
+  bar.id = "whoami";
+  if (slot) slot.appendChild(bar); else document.body.appendChild(bar);
   if (!PB.client()) { gate.parentNode.removeChild(gate); return; }  // unconfigured: local mode
+
+  function esc(s) { return String(s == null ? "" : s).replace(/[<>&"]/g, ""); }
 
   function chrome() {
     var cur = PB.siteId(), list = PB.sites();
+    var siteName = esc((PB.siteRecord() || {}).name || "");
     var opts = list.map(function (s) {
       return '<option value="' + s.id + '"' + (s.id === cur ? " selected" : "") + ">" +
-             String(s.name || s.id).replace(/[<>&]/g, "") + "</option>";
+             esc(s.name || s.id) + "</option>";
     }).join("");
-    bar.innerHTML = (list.length > 1 ? '<select id="siteSel">' + opts + "</select>"
-                                     : "<span>" + String((PB.siteRecord() || {}).name || "") + "</span>") +
-                    '<span class="role">' + String(PB.role() || "") + "</span>" +
-                    (PB.isAdmin() ? '<button type="button" class="people" id="people">People</button>' : "") +
-                    '<button type="button" id="signOut" title="' + String(PB.name() || "") + '">Sign out</button>';
+
+    // who you are, stated once, at the top of the mobile sheet
+    var idBlock = document.getElementById("acctWho");
+    if (!idBlock) {
+      idBlock = document.createElement("div");
+      idBlock.id = "acctWho"; idBlock.className = "acct-id";
+      var host = document.getElementById("acct");
+      if (host) host.insertBefore(idBlock, host.firstChild);
+    }
+    var role = esc(PB.role() || "");
+    idBlock.innerHTML = '<span class="nm">' + esc(PB.name() || "Signed in") + "</span>" +
+                        '<span class="mt">' + (role ? role.charAt(0).toUpperCase() + role.slice(1) : "") +
+                        (siteName ? " &middot; " + siteName : "") + "</span>";
+
+    bar.innerHTML = (list.length > 1
+                      ? '<span class="site"><select id="siteSel" aria-label="Project">' + opts + "</select></span>"
+                      : '<span class="site"><span>' + siteName + "</span></span>") +
+                    '<span class="role">' + esc(PB.role() || "") + "</span>" +
+                    (PB.isAdmin() ? '<button type="button" class="people" id="people">Manage people</button>' : "") +
+                    '<button type="button" id="signOut" title="' + esc(PB.name() || "") + '">Sign out</button>';
     bar.style.display = "flex";
     var sel = document.getElementById("siteSel");
     if (sel) sel.onchange = function () { PB.useSite(this.value); };
