@@ -142,6 +142,12 @@
   .bkt-bar { height: 4px; border-radius: 99px; background: var(--sunk); overflow: hidden; display: flex; }
   .bkt-bar i { display: block; height: 100%; background: var(--accent-bright); }
   .bkt-bar i.done { background: var(--good); }
+  /* a bucket is a filter, not a label — clicking it narrows the board to that page type */
+  .bkt { display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
+         background: none; border: 0; padding: 4px 6px; margin: -4px -6px; border-radius: 8px; }
+  .bkt:hover { background: var(--surface-2); }
+  .bkt[aria-pressed="true"] { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+  .bkt[aria-pressed="true"] .cnt { color: var(--accent); }
 
   /* ---------- workstream strip ---------- */
   .ws-strip {
@@ -150,13 +156,28 @@
   .ws-tile {
     background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 11px 13px 12px;
     display: flex; flex-direction: column; gap: 7px;
+    width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
   }
+  .ws-tile:hover { border-color: var(--line-strong); }
+  .ws-tile[aria-pressed="true"] { border-color: hsl(var(--ws-h) 42% 42%); box-shadow: inset 0 0 0 1px hsl(var(--ws-h) 42% 42%); }
+  .ws-tile .open { font-size: 11.5px; color: var(--ink-3); }
+  .ws-tile .open b { font-weight: 600; color: var(--accent); }
   .ws-tile .hd { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; }
   .ws-tile .hd i { width: 7px; height: 7px; border-radius: 2px; background: hsl(var(--ws-h) 42% 42%); flex: none; }
   .ws-tile .val { font-family: var(--f-mono); font-size: 17px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
   .ws-tile .val small { font-size: 11.5px; color: var(--ink-3); font-family: var(--f-body); letter-spacing: 0; }
   .ws-tile .tr { height: 4px; border-radius: 99px; background: var(--sunk); overflow: hidden; }
   .ws-tile .tr i { display: block; height: 100%; background: hsl(var(--ws-h) 44% 38%); }
+  /* claiming is a one-tap action on the card itself, so nobody has to open the task to take it */
+  .claim { margin-left: 2px; font-size: 11px; font-weight: 600; letter-spacing: .01em; line-height: 1;
+           padding: 4px 9px; border-radius: 99px; border: 1px solid var(--line-strong);
+           background: var(--surface); color: var(--ink-2); cursor: pointer; white-space: nowrap; }
+  .claim:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .claim:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .xinv { display: flex; gap: 9px; align-items: flex-start; font-size: 12.5px; color: var(--ink-2);
+          background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px;
+          padding: 10px 12px; margin: 0 0 12px; cursor: pointer; }
+  .xinv input { margin: 1px 0 0; flex: none; }
 
   /* ---------- toolbar ---------- */
   .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -1263,6 +1284,7 @@
         </div>
       </div>
       <p class="hint" id="xSummary"></p>
+      <label class="xinv" id="xInvWrap" hidden><input type="checkbox" id="xInv"> <span id="xInvText"></span></label>
       <div id="xRows" class="x-rows"></div>
     </div>
   </div>
@@ -1539,7 +1561,7 @@
   var state = { ready: false, hydrated: false, tasks: {}, team: {}, meetings: {}, activity: [], brand: {}, reads: {}, personal: {}, openTask: null,
                 inventory: [],   // filled from Supabase, or from the demo seed when unconfigured
                 invLabel: "Approved page inventory",
-                filter: "all", wsFilter: "all", mStatus: "writing", me: "", view: "board", profile: null };
+                filter: "all", wsFilter: "all", bucketFilter: "all", mStatus: "writing", me: "", view: "board", profile: null };
   var db = null, sampler = null, downloads = null;
   var editing = null, editingPerson = null, editingMeeting = null, dragId = null;
   var invDraft = null, invDirty = false, invBaseline = null, drawerCreating = false;
@@ -1680,10 +1702,28 @@
       return CREATE_DENIED;
     return msg;
   }
+  var CLAIM_DENIED = "Only an editor or above can take project work. Ask the project manager to assign it to you.";
   var CREATE_DENIED = "Only an owner or admin can create project tasks. Ask the project manager to create the task for you.";
   /* Creation is owner/admin only. The database enforces it; this keeps the
      interface honest and gives a reason rather than a refusal. */
   function canCreateTasks() { return !live() || (window.PB.isAdmin && PB.isAdmin()); }
+  // claiming writes to the task row, so it needs the same editor right the database enforces
+  function canClaim() { return !live() || !!(window.PB.can && PB.can("editor")); }
+  function claimable(t) { return !t.owner && t.status !== "live" && canClaim(); }
+  function claimTask(id) {
+    var t = state.tasks[id], me = myKey() || state.me;
+    if (!t) return;
+    if (!me) { toast("Set who you are first, then claim the task.", 4200); return; }
+    if (t.owner) { toast("Already taken by " + ((state.team[t.owner] || {}).name || "someone else")); return; }
+    if (!canClaim()) { toast(CLAIM_DENIED, 5200); return; }
+    var body = {}; for (var k in t) body[k] = t[k];
+    delete body.id;
+    body.owner = me; body.updated = Date.now();
+    putTask(id, body);
+    logEvent("claimed " + id);
+    renderFeed(); if (state.view === "me") renderMe();
+    toast("Yours now \u2014 " + (t.title || id), 3200);
+  }
   function blockCreate() { toast(CREATE_DENIED, 5200); return false; }
   var plural = function (n, word) { return n + " " + word + (n === 1 && /s$/.test(word) ? "" : ""); };
 
@@ -1827,11 +1867,12 @@
   }
   function wsTotals(list) {
     var per = {};
-    WS.forEach(function (w) { per[w.id] = { done: 0, target: 0, tasks: 0, open: 0, unit: w.unit, units: {} }; });
+    WS.forEach(function (w) { per[w.id] = { done: 0, target: 0, tasks: 0, open: 0, free: 0, unit: w.unit, units: {} }; });
     list.forEach(function (t) {
       var p = per[t.ws]; if (!p) return;
       p.tasks++; p.done += delivered(t); p.target += Math.max(t.planned, delivered(t));
       if (t.status !== "live") p.open++;
+      if (t.status !== "live" && !t.owner) p.free++;
       if (t.unit && t.planned) p.units[t.unit] = true;
     });
     // a stream mixing citations and posts has no single unit — say nothing rather than something wrong
@@ -2023,9 +2064,11 @@
       var d = per[b.id] || { live: 0, prog: 0 }, t = Number(b.target) || 0;
       var pctL = t ? Math.min(100, (d.live / t) * 100) : 0;
       var pctP = t ? Math.min(100 - pctL, (d.prog / t) * 100) : 0;
-      return '<div><div class="bkt-name"><span>' + esc(b.label) + '</span><span class="cnt">' +
+      return '<button class="bkt" data-bucket="' + esc(b.id) + '" aria-pressed="' +
+        (state.bucketFilter === b.id) + '" title="Show only ' + esc(b.label) + '">' +
+        '<div class="bkt-name"><span>' + esc(b.label) + '</span><span class="cnt">' +
         d.live + "/" + t + '</span></div><div class="bkt-bar"><i class="done" style="width:' +
-        pctL + '%"></i><i style="width:' + pctP + '%"></i></div></div>';
+        pctL + '%"></i><i style="width:' + pctP + '%"></i></div></button>';
     }).join("");
   }
   function renderWsStrip(list) {
@@ -2035,9 +2078,13 @@
       var val = d.target
         ? d.done + "/" + d.target + (d.unit ? " <small>" + esc(d.unit) + "</small>" : " <small>units</small>")
         : d.open + ' <small>open · no target</small>';
-      return '<div class="ws-tile" style="--ws-h:' + w.hue + '"><div class="hd"><i></i>' + esc(w.label) + "</div>" +
+      return '<button class="ws-tile" data-ws="' + w.id + '" aria-pressed="' + (state.wsFilter === w.id) +
+        '" style="--ws-h:' + w.hue + '" title="Show only ' + esc(w.label) + '">' +
+        '<div class="hd"><i></i>' + esc(w.label) + "</div>" +
         '<div class="val">' + val + "</div>" +
-        '<div class="tr"><i style="width:' + pct + '%"></i></div></div>';
+        '<div class="tr"><i style="width:' + pct + '%"></i></div>' +
+        '<div class="open">' + d.open + " open" +
+        (d.free ? " &middot; <b>" + d.free + " unclaimed</b>" : "") + "</div></button>";
     }).join("");
     $("wsStrip").innerHTML = html;
     $("wsStrip").style.display = html ? "" : "none";
@@ -2046,7 +2093,10 @@
     var counts = {};
     list.forEach(function (t) { if (t.status !== "live") counts[t.owner] = (counts[t.owner] || 0) + 1; });
     var blocked = list.filter(function (t) { return t.blocked; }).length;
+    var free = list.filter(function (t) { return !t.owner && t.status !== "live"; }).length;
     var html = '<button class="chip" data-f="all" aria-pressed="' + (state.filter === "all") + '">Everyone <span class="n">' + list.length + "</span></button>";
+    html += '<button class="chip" data-f="unassigned" aria-pressed="' + (state.filter === "unassigned") +
+      '">Unclaimed <span class="n">' + free + "</span></button>";
     teamIds().forEach(function (id) {
       html += '<button class="chip" data-f="' + esc(id) + '" aria-pressed="' + (state.filter === id) + '">' +
         esc(state.team[id].name) + ' <span class="n">' + (counts[id] || 0) + "</span></button>";
@@ -2065,7 +2115,12 @@
       esc(typeOf(t.ws, t.type).label) + "</span></div>" +
       "<h3>" + esc(t.title) + "</h3>" +
       (t.url ? '<div class="path">' + esc(t.url) + "</div>" : "") +
-      '<div class="card-foot">' + ava(t.owner) +
+      '<div class="card-foot">' +
+      // the Claim pill already says "nobody owns this", so it replaces the empty avatar
+      (claimable(t)
+        ? '<span class="claim" role="button" tabindex="0" data-claim="' + esc(t.id) +
+          '" aria-label="Claim ' + esc(t.id) + '">Claim</span>'
+        : ava(t.owner)) +
       (t.helpers && t.helpers.length ? '<span class="helpers">' + t.helpers.map(function (x) { return ava(x); }).join("") + "</span>" : "") +
       (t.planned ? '<span class="mini"><i style="width:' + pct + '%"></i></span><span class="pg">' +
         delivered(t) + "/" + t.planned + " " + esc(t.unit) + "</span>"
@@ -2078,10 +2133,26 @@
   function visible(list) {
     return list.filter(function (t) {
       if (state.wsFilter !== "all" && t.ws !== state.wsFilter) return false;
+      // a page-type filter only ever means website pages of that inventory bucket
+      if (state.bucketFilter !== "all" && !(t.ws === "web" && bucketOf(t) === state.bucketFilter)) return false;
       if (state.filter === "all") return true;
       if (state.filter === "blocked") return t.blocked;
+      // "unclaimed" means work still waiting for someone — finished work needs nobody
+      if (state.filter === "unassigned") return !t.owner && t.status !== "live";
       return t.owner === state.filter;
     });
+  }
+  function bucketOf(t) { return t.type || t.bucket || ""; }
+  // the two category filters are alternatives — picking one clears the other
+  function setWsFilter(id) {
+    state.wsFilter = state.wsFilter === id && id !== "all" ? "all" : id;
+    if (state.wsFilter !== "all") state.bucketFilter = "all";
+    render();
+  }
+  function setBucketFilter(id) {
+    state.bucketFilter = state.bucketFilter === id ? "all" : id;
+    if (state.bucketFilter !== "all") state.wsFilter = "all";
+    render();
   }
   function renderBoard(list) {
     var vis = visible(list);
@@ -2145,9 +2216,10 @@
 
     // the chip row is unusable once it wraps, so narrow screens get the same filter as a picker
     var who = $("whoFilter");
-    var hopts = "<option value='all'>Everyone</option>" + teamIds().map(function (id) {
-      return "<option value='" + esc(id) + "'>" + esc(state.team[id].name) + "</option>";
-    }).join("") + "<option value='blocked'>Blocked only</option>";
+    var hopts = "<option value='all'>Everyone</option><option value='unassigned'>Unclaimed only</option>" +
+      teamIds().map(function (id) {
+        return "<option value='" + esc(id) + "'>" + esc(state.team[id].name) + "</option>";
+      }).join("") + "<option value='blocked'>Blocked only</option>";
     if (who.innerHTML !== hopts) who.innerHTML = hopts;
     who.value = state.filter;
   }
@@ -3038,21 +3110,45 @@
     { re: /content|copywriting|brief|keyword research|blog|editorial/i, ws: "content" },
     { re: /report|tracking|analytics|meeting|strategy|governance|handover/i, ws: "admin" }
   ];
-  function bucketForUrl(url) {
-    var segs = url.replace(/^\/|\/$/g, "").split("/").filter(Boolean);
+  // What shape of page a URL is, independent of what the project's inventory happens
+  // to be called. Everything else maps this onto the client's own approved types.
+  function planBucket(url) {
+    var segs = String(url).replace(/^\/|\/$/g, "").split("/").filter(Boolean);
     var first = (segs[0] || "").toLowerCase();
-    var inv = inventory();
-    var find = function (re) {
-      for (var i = 0; i < inv.length; i++) if (re.test(inv[i].label) || re.test(inv[i].id)) return inv[i].id;
-      return null;
-    };
     // a single-segment URL is a top-level page — /services/ is the hub, not a service page
-    if (segs.length <= 1) return find(/core/i) || "other";
-    if (/^services?$/.test(first)) return find(/service/i) || "other";
-    if (/^areas?$|^locations?$/.test(first)) return find(/area|location/i) || "other";
-    if (/^guides?$|^blog$|^resources?$/.test(first)) return find(/guide|blog/i) || "other";
-    if (/^projects?$|^case|^work$|^portfolio$/.test(first)) return find(/case|project/i) || "other";
-    return find(/service/i) || "other";
+    if (segs.length <= 1) return { id: "core", label: "Core pages" };
+    if (/^services?$/.test(first)) {
+      // /services/extensions/single-storey/ is a child of the hub, not another hub
+      return segs.length >= 3 ? { id: "child-service", label: "Child services" }
+                              : { id: "service", label: "Service pages" };
+    }
+    if (/^areas?$|^locations?$/.test(first)) return { id: "area", label: "Area pages" };
+    if (/^guides?$|^blog$|^resources?$/.test(first)) return { id: "guide", label: "Guides" };
+    if (/^projects?$|^case|^work$|^portfolio$/.test(first)) return { id: "case", label: "Case studies" };
+    return { id: "service", label: "Service pages" };
+  }
+  var CHILD_RE = /child|sub-?service|supporting/i;
+  function invIndexFor(bid, inv) {
+    var find = function (re, not) {
+      for (var i = 0; i < inv.length; i++) {
+        var lab = (inv[i].label || "") + " " + (inv[i].id || "");
+        if (re.test(lab) && !(not && not.test(lab))) return i;
+      }
+      return -1;
+    };
+    if (bid === "core") return find(/core/i);
+    // a child page only gets its own row when the plan actually has one; otherwise it
+    // counts against the service row, which is where its task lands too
+    if (bid === "child-service") { var c = find(CHILD_RE); return c >= 0 ? c : find(/service/i); }
+    if (bid === "service") { var sv = find(/service/i, CHILD_RE); return sv >= 0 ? sv : find(/service/i); }
+    if (bid === "area") return find(/area|location/i);
+    if (bid === "guide") return find(/guide|blog/i);
+    if (bid === "case") return find(/case|project/i);
+    return -1;
+  }
+  function bucketForUrl(url) {
+    var inv = inventory(), i = invIndexFor(planBucket(url).id, inv);
+    return i >= 0 ? inv[i].id : "other";
   }
   function isSilo(segs) {
     return segs.length >= 2 && /^(services?|areas?|locations?)$/.test((segs[0] || "").toLowerCase());
@@ -3203,6 +3299,62 @@
   // grouping builds new objects, so the shown list is materialised once and then
   // mutated in place — recomputing it on every tick would discard the ticks
   function rebuildX() { xShown = (xMode === "group" ? groupRows(xRaw) : xRaw); renderXRows(); }
+  // The importer creates tasks; the inventory is the client's approved plan and stays
+  // the owner's decision, so this is offered per import and never applied silently.
+  function importInvPlan() {
+    var per = {}, order = [];
+    var add = function (url, n) {
+      var b = planBucket(url);
+      if (!per[b.id]) { per[b.id] = { id: b.id, label: b.label, n: 0 }; order.push(b.id); }
+      per[b.id].n += n;
+    };
+    xShown.forEach(function (r) {
+      if (!r.include || r.kind !== "page") return;
+      // a grouped row stands for its members, and a silo group mixes hubs with their children
+      if (r.members && r.members.length) r.members.forEach(function (m) { add(m.url, 1); });
+      else if (r.url) add(r.url, Number(r.target) || 1);
+    });
+    return order.map(function (k) { return per[k]; });
+  }
+  function importInvPreview() {
+    var inv = inventory(), out = [], at = {};
+    importInvPlan().forEach(function (p) {
+      var i = invIndexFor(p.id, inv);
+      var label = i >= 0 ? inv[i].label : p.label;
+      if (at[label] === undefined) { at[label] = out.length; out.push({ label: label, n: 0 }); }
+      out[at[label]].n += p.n;
+    });
+    return out;
+  }
+  function renderInvOffer() {
+    var wrap = $("xInvWrap"), plan = importInvPreview();
+    var total = plan.reduce(function (a, p) { return a + p.n; }, 0);
+    if (!total || !canCreateTasks()) { wrap.hidden = true; $("xInv").checked = false; return; }
+    wrap.hidden = false;
+    $("xInvText").innerHTML = "Also add these <b>" + total + " pages</b> to the approved inventory (" +
+      plan.map(function (p) { return esc(p.label) + " +" + p.n; }).join(" &middot; ") +
+      "). Leave it unticked for work that is not cleared for production yet.";
+  }
+  function applyImportInventory() {
+    var plan = importInvPlan();
+    if (!plan.length) return 0;
+    var inv = inventory().map(function (b) {
+      return { id: b.id, label: b.label, target: Number(b.target) || 0 };
+    });
+    var taken = inv.map(function (b) { return b.id; }), added = 0;
+    plan.forEach(function (p) {
+      var i = invIndexFor(p.id, inv);
+      if (i < 0) {
+        var id = invSlug(p.label, taken);
+        taken.push(id);
+        inv.push({ id: id, label: p.label, target: p.n });
+      } else inv[i].target += p.n;
+      added += p.n;
+    });
+    state.inventory = inv;
+    putInventory();
+    return added;
+  }
   function renderXRows() {
     var rows = xShown;
     var on = rows.filter(function (r) { return r.include; });
@@ -3213,6 +3365,7 @@
       "</b> ready" + (pages ? ", covering " + pages + " pages" : "") +
       (flagged ? " &middot; <span style='color:var(--warn)'>" + flagged + " flagged for review</span>" : "") +
       ". Untick anything you do not want.";
+    renderInvOffer();
     var lastWs = null;
     $("xRows").innerHTML = rows.map(function (r, i) {
       var head = "";
@@ -3237,6 +3390,7 @@
     $("xStep1").hidden = false; $("xStep2").hidden = true;
     $("xAdd").hidden = true; $("xBack").hidden = true;
     $("xFile").value = ""; $("xPaste").value = "";
+    $("xInv").checked = false; $("xInvWrap").hidden = true;
     $("xHead").textContent = "Import a plan";
     $("scrim").classList.add("open");
     $("xdrawer").classList.add("open");
@@ -3275,11 +3429,14 @@
       state.tasks[id] = body;
       if (db) db.doc("tasks/" + id).set(body).catch(function () {});
     });
+    var invAdded = (!$("xInvWrap").hidden && $("xInv").checked) ? applyImportInventory() : 0;
     if (!db) localSave();
-    logEvent("imported " + rows.length + " task(s) from " + xSource);
+    logEvent("imported " + rows.length + " task(s) from " + xSource +
+      (invAdded ? " and added " + invAdded + " pages to the approved inventory" : ""));
     render(); renderFeed();
     closeImport();
-    toast("Added " + rows.length + " tasks — all unassigned", 3200);
+    toast("Added " + rows.length + " tasks — all unassigned" +
+      (invAdded ? " · inventory +" + invAdded + " pages" : ""), 3600);
   }
 
   /* ===================== inventory drawer ===================== */
@@ -3539,6 +3696,13 @@
     if (pbtn) { openPerson(pbtn.getAttribute("data-person")); return; }
     var prow = e.target.closest("tr[data-person]");
     if (prow) { state.profile = prow.getAttribute("data-person"); render(); return; }
+    // the claim pill sits inside the card, so it has to be tested first
+    var clm = e.target.closest("[data-claim]");
+    if (clm) { e.preventDefault(); e.stopPropagation(); claimTask(clm.getAttribute("data-claim")); return; }
+    var bkt = e.target.closest("[data-bucket]");
+    if (bkt) { setBucketFilter(bkt.getAttribute("data-bucket")); return; }
+    var wst = e.target.closest("[data-ws]");
+    if (wst) { setWsFilter(wst.getAttribute("data-ws")); return; }
     var tl = e.target.closest(".tl");
     if (tl) { openDrawer(tl.getAttribute("data-id")); return; }
     var card = e.target.closest(".card");
@@ -3861,7 +4025,18 @@
     renderNotifications();
     renderMe();
   });
-  $("wsFilter").addEventListener("change", function () { state.wsFilter = this.value; render(); });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    var clm = e.target.closest && e.target.closest("[data-claim]");
+    if (!clm) return;
+    e.preventDefault(); e.stopPropagation();
+    claimTask(clm.getAttribute("data-claim"));
+  });
+  $("wsFilter").addEventListener("change", function () {
+    state.wsFilter = this.value;
+    if (state.wsFilter !== "all") state.bucketFilter = "all";
+    render();
+  });
   document.addEventListener("change", function (e) {
     if (e.target.id !== "mwWho" || !e.target.value) return;
     if (live()) return;

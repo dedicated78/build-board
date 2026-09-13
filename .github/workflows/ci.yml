@@ -48,3 +48,6 @@ jobs:
 
       - name: Inventory state and task-creation permissions
         run: node test/inventory-tasks.test.js
+
+      - name: Category filters, claiming and the import inventory offer
+        run: node test/claim-filters.test.js
