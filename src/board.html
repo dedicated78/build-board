@@ -1396,7 +1396,7 @@
   var DEFAULT_NOTIFY = { assigned: true, due: true, overdue: true, blocked: true, meeting: true, digest: true };
   var DUE_STEPS = [3, 1, 0];   // days before a deadline that earn a nudge
 
-  var state = { tasks: {}, team: {}, meetings: {}, activity: [], brand: {}, reads: {}, personal: {}, openTask: null,
+  var state = { ready: false, tasks: {}, team: {}, meetings: {}, activity: [], brand: {}, reads: {}, personal: {}, openTask: null,
                 inventory: DEFAULT_INVENTORY.map(function (b) { return { id: b.id, label: b.label, target: b.target }; }),
                 invLabel: "Approved page inventory",
                 filter: "all", wsFilter: "all", mStatus: "writing", me: "", view: "board", profile: null };
@@ -2572,10 +2572,15 @@
      to the invitation flow. */
   function viewKey() {
     var s = (window.PB && PB.siteId && PB.siteId()) || "local";
-    return "rmm-view:" + s + ":" + (state.me || "anon");
+    return "build-board:view:" + s + ":" + (state.me || "anon");
   }
   var VIEWS = { board: 1, team: 1, report: 1, me: 1 };
-  function rememberView(v) { try { if (VIEWS[v]) localStorage.setItem(viewKey(), v); } catch (e) {} }
+  /* Only a real navigation is remembered. Nothing during boot may write, or a
+     start-up default would overwrite the page the person was actually on. */
+  function rememberView(v) {
+    if (!state.ready) return;
+    try { if (VIEWS[v]) localStorage.setItem(viewKey(), v); } catch (e) {}
+  }
   function savedView() {
     try { var v = localStorage.getItem(viewKey()); return VIEWS[v] ? v : ""; } catch (e) { return ""; }
   }
@@ -3836,7 +3841,12 @@
 
   /* ===================== boot ===================== */
   try { state.me = localStorage.getItem("rmm-board-me") || ""; } catch (e) {}
-  localLoad();
+  /* Supabase is authoritative once configured: the legacy local cache may
+     hold a previous project's inventory, team and tasks, and painting it first
+     is what caused the visible jump on refresh. Preferences (last view, chosen
+     identity) are read separately and are not project data. */
+  if (!live()) localLoad();
+  else document.body.classList.add("booting");
   ["agency", "client", "period", "foot"].forEach(function (k) {
     var el = $("b" + k.charAt(0).toUpperCase() + k.slice(1));
     if (el) brandField(k, el);
@@ -3846,7 +3856,10 @@
   if (window.innerWidth <= 700) $("brandbar").classList.add("collapsed");
   syncRepPanel();
   render();
-  setView("board");   // never My Work by default; the saved view is restored after auth resolves
+  // Offline demo boots straight to the board. In live mode the view is chosen
+  // once, after auth and the project data have resolved — so nothing renders
+  // Board first and then jumps to Team or Report.
+  if (!live()) { state.ready = true; setView("board"); }
   syncAppbar();
   window.addEventListener("resize", syncAppbar);
   setTimeout(syncAppbar, 600);
@@ -3868,9 +3881,9 @@
     if (PB.me && PB.me()) state.me = PB.me();
     document.body.classList.add("auth-live");
     if (PB.isAdmin && PB.isAdmin()) document.body.classList.add("can-admin");
-    var restore = savedView();
-    setView(restore || "board");
-    if (state.view === "me") renderMe();
+    // fill every collection before the first paint, so the board never shows
+    // defaults and then swaps them for the project's real figures
+    if (PB.warmup) { try { await PB.warmup(); } catch (e) {} }
     db.collection("tasks").onSnapshot(function (snap) {
       var next = {}; snap.docs.forEach(function (d) { next[d.id] = clone(d.data()) || {}; });
       state.tasks = next; render();
@@ -3916,6 +3929,21 @@
       renderLogoSlots();
       if (state.view === "report") renderReport();
     }, function () {});
+
+    /* Everything above is fed from caches the warmup already filled, so one
+       turn of the event loop is enough for the first paint to be the real
+       project. Only now is a view chosen, and only now may navigation be
+       remembered. */
+    await new Promise(function (res) { setTimeout(res, 0); });
+    var restore = savedView();
+    state.ready = true;
+    setView(restore || "board");
+    render();
+    if (state.view === "me") renderMe();
+    document.body.classList.remove("booting");
+    var bootEl = document.getElementById("boot");
+    if (bootEl) bootEl.hidden = true;
+    syncAppbar();
   })();
 })();
 </script>

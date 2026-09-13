@@ -151,6 +151,10 @@
         API._session = s.data && s.data.session;
         if (!API._session) return { ok: false, reason: "anon" };
         try { await API.loadProfile(); } catch (e) { return { ok: false, reason: "profile", error: e }; }
+        // A real account can hold no memberships — removed from every project,
+        // or invited and not yet accepted. That is not an error, and it must
+        // never be reported before a pending invitation has been tried.
+        if (!site) return { ok: false, reason: "noproject" };
         return { ok: true };
       })();
       return booted;
@@ -165,7 +169,7 @@
       var sr = await sb.from("sites").select("id,name,client").order("name");
       if (sr.error) throw sr.error;
       sites = sr.data || [];
-      if (!sites.length) throw new Error("not a member of any site");
+      if (!sites.length) { site = null; role = ""; return; }
 
       var want = localStorage.getItem("rmm-site");
       var pick = sites.filter(function (x) { return x.id === want; })[0] || sites[0];
@@ -321,12 +325,38 @@
     },
 
     // already signed in, opening a link for another project
+    inviteErrorText: function (e) {
+      var m = String((e && (e.message || e.details || e.code)) || "");
+      if (/invite_email_mismatch/.test(m)) return "This invitation was sent to a different email address.";
+      if (/invite_expired/.test(m))       return "This invitation has expired. Ask the project manager for a new invitation.";
+      if (/invite_used/.test(m))          return "This invitation has already been used. Ask the project manager for a new one.";
+      if (/invite_not_found|not valid/i.test(m))
+        return "This invitation is no longer valid. Ask the project manager for a new invitation.";
+      return friendlyError(e);
+    },
+
+    /* Joining another project, or rejoining one you were removed from. The
+       account, the people row and the board key all stay exactly as they are —
+       only a membership is added back. */
     acceptInvite: async function (token) {
       var r = await sb.rpc("accept_invite", { t: token });
       if (r.error) throw r.error;
       var row = Array.isArray(r.data) ? r.data[0] : r.data;
       if (row && row.site) localStorage.setItem("rmm-site", row.site);
+      booted = null;                       // membership changed: resolve again
+      API._teamSync = null;
+      try { await API.loadProfile(); } catch (e) {}
       return row;
+    },
+
+    /* Fill every collection's cache before the first paint, so the app never
+       renders defaults and then jumps to the real project. */
+    warmup: async function () {
+      if (!sb || !site) return false;
+      await Promise.all(["tasks", "team", "meetings", "meta", "personal"].map(function (t) {
+        return start(t).catch(function () { return null; });
+      }));
+      return true;
     },
 
     downloads: {

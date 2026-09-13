@@ -1353,6 +1353,22 @@
   #gate .err{font-size:12.5px;color:var(--red);margin:12px 0 0;line-height:1.5;display:none}
   #gate .err.on{display:block}
   #gate .gfoot{text-align:center;font-size:11.5px;color:var(--muted);margin:16px 0 0}
+  #gate .ghost{background:transparent;color:var(--navy-2);border:1px solid var(--line);margin-top:10px}
+  #gate .ghost:hover{background:var(--paper);color:var(--navy)}
+  /* a quiet branded wait, never a spinner that outlives the load */
+  #boot{position:fixed;inset:0;z-index:9998;background:var(--cream);display:flex;align-items:center;
+    justify-content:center;padding:24px;font-family:"IBM Plex Sans",system-ui,sans-serif}
+  #boot .bwrap{text-align:center}
+  #boot .eb{font-family:"Archivo",system-ui,sans-serif;font-size:10.5px;font-weight:700;
+    letter-spacing:.15em;text-transform:uppercase;color:var(--navy-2)}
+  #boot .nm{font-family:"Archivo",system-ui,sans-serif;font-size:24px;font-weight:700;
+    letter-spacing:-.02em;color:var(--navy);line-height:1.2;margin-top:3px}
+  #boot .st{font-size:13px;color:var(--muted);margin-top:8px}
+  #boot .bar{width:148px;height:3px;border-radius:99px;background:#E5DED2;overflow:hidden;margin:16px auto 0}
+  #boot .bar i{display:block;width:40%;height:100%;background:var(--teal);border-radius:99px;
+    animation:bootslide 1.1s ease-in-out infinite}
+  @keyframes bootslide{0%{transform:translateX(-100%)}100%{transform:translateX(320%)}}
+  @media (prefers-reduced-motion:reduce){#boot .bar i{animation:none;width:100%}}
 
   /* ---- account: inline in the header on desktop, inside .acct on mobile ---- */
   #whoami{display:none;flex-direction:column;align-items:stretch;gap:6px;width:100%;
@@ -1383,6 +1399,12 @@
   body.role-viewer #addMeeting, body.role-viewer #xAdd{display:none!important}
 
 </style>
+<div id="boot"><div class="bwrap">
+  <div class="eb">RMM Builders Ltd</div>
+  <div class="nm">Build Board</div>
+  <div class="st" id="bootMsg">Loading&hellip;</div>
+  <div class="bar"><i></i></div>
+</div></div>
 <div id="gate" hidden><div class="gwrap">
   <div class="glock">
     <div class="eb">RMM Builders Ltd</div>
@@ -1503,7 +1525,7 @@
   var DEFAULT_NOTIFY = { assigned: true, due: true, overdue: true, blocked: true, meeting: true, digest: true };
   var DUE_STEPS = [3, 1, 0];   // days before a deadline that earn a nudge
 
-  var state = { tasks: {}, team: {}, meetings: {}, activity: [], brand: {}, reads: {}, personal: {}, openTask: null,
+  var state = { ready: false, tasks: {}, team: {}, meetings: {}, activity: [], brand: {}, reads: {}, personal: {}, openTask: null,
                 inventory: DEFAULT_INVENTORY.map(function (b) { return { id: b.id, label: b.label, target: b.target }; }),
                 invLabel: "Approved page inventory",
                 filter: "all", wsFilter: "all", mStatus: "writing", me: "", view: "board", profile: null };
@@ -2679,10 +2701,15 @@
      to the invitation flow. */
   function viewKey() {
     var s = (window.PB && PB.siteId && PB.siteId()) || "local";
-    return "rmm-view:" + s + ":" + (state.me || "anon");
+    return "build-board:view:" + s + ":" + (state.me || "anon");
   }
   var VIEWS = { board: 1, team: 1, report: 1, me: 1 };
-  function rememberView(v) { try { if (VIEWS[v]) localStorage.setItem(viewKey(), v); } catch (e) {} }
+  /* Only a real navigation is remembered. Nothing during boot may write, or a
+     start-up default would overwrite the page the person was actually on. */
+  function rememberView(v) {
+    if (!state.ready) return;
+    try { if (VIEWS[v]) localStorage.setItem(viewKey(), v); } catch (e) {}
+  }
   function savedView() {
     try { var v = localStorage.getItem(viewKey()); return VIEWS[v] ? v : ""; } catch (e) { return ""; }
   }
@@ -3943,7 +3970,12 @@
 
   /* ===================== boot ===================== */
   try { state.me = localStorage.getItem("rmm-board-me") || ""; } catch (e) {}
-  localLoad();
+  /* Supabase is authoritative once configured: the legacy local cache may
+     hold a previous project's inventory, team and tasks, and painting it first
+     is what caused the visible jump on refresh. Preferences (last view, chosen
+     identity) are read separately and are not project data. */
+  if (!live()) localLoad();
+  else document.body.classList.add("booting");
   ["agency", "client", "period", "foot"].forEach(function (k) {
     var el = $("b" + k.charAt(0).toUpperCase() + k.slice(1));
     if (el) brandField(k, el);
@@ -3953,7 +3985,10 @@
   if (window.innerWidth <= 700) $("brandbar").classList.add("collapsed");
   syncRepPanel();
   render();
-  setView("board");   // never My Work by default; the saved view is restored after auth resolves
+  // Offline demo boots straight to the board. In live mode the view is chosen
+  // once, after auth and the project data have resolved — so nothing renders
+  // Board first and then jumps to Team or Report.
+  if (!live()) { state.ready = true; setView("board"); }
   syncAppbar();
   window.addEventListener("resize", syncAppbar);
   setTimeout(syncAppbar, 600);
@@ -3982,9 +4017,9 @@
     if (PB.me && PB.me()) state.me = PB.me();
     document.body.classList.add("auth-live");
     if (PB.isAdmin && PB.isAdmin()) document.body.classList.add("can-admin");
-    var restore = savedView();
-    setView(restore || "board");
-    if (state.view === "me") renderMe();
+    // fill every collection before the first paint, so the board never shows
+    // defaults and then swaps them for the project's real figures
+    if (PB.warmup) { try { await PB.warmup(); } catch (e) {} }
     db.collection("tasks").onSnapshot(function (snap) {
       var next = {}; snap.docs.forEach(function (d) { next[d.id] = clone(d.data()) || {}; });
       state.tasks = next; render();
@@ -4030,6 +4065,21 @@
       renderLogoSlots();
       if (state.view === "report") renderReport();
     }, function () {});
+
+    /* Everything above is fed from caches the warmup already filled, so one
+       turn of the event loop is enough for the first paint to be the real
+       project. Only now is a view chosen, and only now may navigation be
+       remembered. */
+    await new Promise(function (res) { setTimeout(res, 0); });
+    var restore = savedView();
+    state.ready = true;
+    setView(restore || "board");
+    render();
+    if (state.view === "me") renderMe();
+    document.body.classList.remove("booting");
+    var bootEl = document.getElementById("boot");
+    if (bootEl) bootEl.hidden = true;
+    syncAppbar();
   })();
 })();
 
@@ -4042,7 +4092,11 @@
   var bar  = document.createElement("div");
   bar.id = "whoami";
   if (slot) slot.appendChild(bar); else document.body.appendChild(bar);
-  if (!PB.client()) { gate.parentNode.removeChild(gate); return; }  // unconfigured: local mode
+  if (!PB.client()) {                      // unconfigured: local demo, no shell, no gate
+    gate.parentNode.removeChild(gate);
+    var b0 = document.getElementById("boot"); if (b0) b0.parentNode.removeChild(b0);
+    return;
+  }
 
   function esc(s) { return String(s == null ? "" : s).replace(/[<>&"]/g, ""); }
 
@@ -4112,10 +4166,14 @@
         .catch(function (err) {
           b2.disabled = false; b2.textContent = "Create account";
           var m = (err && err.message) || "";
+          if (/already registered/i.test(m)) {
+            try { sessionStorage.setItem("pendingInviteToken", token); } catch (x) {}
+            return openGate("You already have an account. Sign in to accept this invitation.");
+          }
           e2.textContent =
             m === "NEEDS_CONFIRM" ? "Account created. Check your email to confirm it, then sign in." :
             /invitation only|not valid/i.test(m) ? m :
-            /already registered/i.test(m) ? "That email already has an account — sign in instead, then open this link again." :
+            /already registered/i.test(m) ? "" :
             /password/i.test(m) ? "Pick a password of at least 8 characters." :
             "Couldn't create the account. Ask your admin for a fresh invite link.";
           e2.classList.add("on");
@@ -4125,6 +4183,8 @@
 
   function openGate(msg) {
     gate.hidden = false;
+    var card = gate.querySelector(".gcard");
+    if (!document.getElementById("gateForm")) { card.innerHTML = signInCard; bindSignIn(); }
     var err = document.getElementById("gErr");
     if (msg) { err.textContent = msg; err.classList.add("on"); }
   }
@@ -4137,39 +4197,91 @@
     if (/invite=[0-9a-f-]{36}/i.test(location.hash)) location.reload();
   });
 
+  var signInCard = gate.querySelector(".gcard").innerHTML;   // kept so we can come back to it
+
+  function bootMsg(t) { var b = document.getElementById("bootMsg"); if (b) b.textContent = t; }
+  function hideBoot() { var b = document.getElementById("boot"); if (b) b.hidden = true; }
+
+  /* An account with no memberships may still hold a valid invitation, so the
+     invitation is always tried first. Nobody is told they are not on a project
+     until that has been resolved. */
+  function consumeInvite(tok) {
+    bootMsg("Accepting your invitation…");
+    return PB.acceptInvite(tok).then(function () {
+      try { sessionStorage.removeItem("pendingInviteToken"); } catch (e) {}
+      location.hash = "";
+      location.reload();            // one clean load of the joined project
+    });
+  }
+
   PB.ready().then(function (r) {
-    if (r.ok && token) {
-      // already signed in, opening a link for another project
-      return PB.acceptInvite(token)
-        .then(function () { location.hash = ""; location.reload(); })
-        .catch(function (e) { chrome(); alert(e.message || "That invitation is not valid any more."); });
+    var signedIn = r.ok || r.reason === "noproject";
+    var pending = token || (function () {
+      try { return sessionStorage.getItem("pendingInviteToken") || ""; } catch (e) { return ""; }
+    })();
+
+    if (signedIn && pending) {
+      return consumeInvite(pending).catch(function (e) {
+        var msg = PB.inviteErrorText ? PB.inviteErrorText(e) : "That invitation is no longer valid.";
+        try { sessionStorage.removeItem("pendingInviteToken"); } catch (x) {}
+        if (r.ok) { hideBoot(); chrome(); toastLike(msg); return; }
+        hideBoot(); openNoProject(msg);
+      });
     }
-    if (token && !r.ok) return openSignup();
-    if (r.ok) return chrome();
+    if (r.ok) { hideBoot(); return chrome(); }
+    if (r.reason === "noproject") { hideBoot(); return openNoProject(""); }
+
+    // signed out
+    hideBoot();
+    if (token) { try { sessionStorage.setItem("pendingInviteToken", token); } catch (e) {} return openSignup(); }
     if (r.reason === "profile")
-      return openGate("Signed in, but this account isn't on a project yet — ask your admin to add you.");
+      return openGate("We couldn't load your profile. Sign in again, or ask your admin to check your account.");
     openGate("");
   });
 
-  var form = document.getElementById("gateForm"),
-      err  = document.getElementById("gErr"),
-      btn  = document.getElementById("gBtn");
-  form.onsubmit = function (ev) {
-    ev.preventDefault();
-    btn.disabled = true; btn.textContent = "Signing in…"; err.classList.remove("on");
-    PB.login(document.getElementById("gEmail").value.trim(),
-             document.getElementById("gPass").value)
-      .then(function () { location.reload(); })
-      .catch(function (e) {
-        btn.disabled = false; btn.textContent = "Sign in";
-        var m = (e && (e.message || e.error_description)) || "";
-        err.textContent = /member of any site/.test(m)
-          ? "That account isn't on a project yet — ask your admin to add you."
-          : (/fetch|network|Failed/i.test(m) ? "Can't reach the server. Check your connection and try again."
-                                             : "Wrong email or password.");
-        err.classList.add("on");
-      });
-  };
+  function toastLike(msg) {
+    var t = document.getElementById("toast");
+    if (!t) { alert(msg); return; }
+    t.textContent = msg; t.classList.add("show");
+    setTimeout(function () { t.classList.remove("show"); }, 5200);
+  }
+
+  /* A real, valid state: signed in and on no project at all. */
+  function openNoProject(msg) {
+    gate.hidden = false;
+    var card = gate.querySelector(".gcard");
+    card.innerHTML =
+      "<h1>You're not currently part of a project</h1>" +
+      "<p>" + (msg ? String(msg).replace(/[<>&]/g, "") + " " : "") +
+      "Ask a project owner or admin to invite you. If you have an invitation link, open it while signed in.</p>" +
+      '<button type="button" class="ghost" id="npOut">Sign out</button>';
+    document.getElementById("npOut").onclick = function () { PB.logout(); };
+  }
+
+  // bound on first load, and again whenever the card is restored
+  function bindSignIn() {
+    var form = document.getElementById("gateForm"),
+        err  = document.getElementById("gErr"),
+        btn  = document.getElementById("gBtn");
+    if (!form) return;
+    form.onsubmit = function (ev) {
+      ev.preventDefault();
+      btn.disabled = true; btn.textContent = "Signing in…"; err.classList.remove("on");
+      PB.login(document.getElementById("gEmail").value.trim(),
+               document.getElementById("gPass").value)
+        // a pending invitation is consumed automatically on the next pass
+        .then(function () { location.reload(); })
+        .catch(function (e) {
+          btn.disabled = false; btn.textContent = "Sign in";
+          var m = (e && (e.message || e.error_description)) || "";
+          err.textContent = /fetch|network|Failed/i.test(m)
+            ? "Can't reach the server. Check your connection and try again."
+            : "Wrong email or password.";
+          err.classList.add("on");
+        });
+    };
+  }
+  bindSignIn();
 })();
 </script>
 

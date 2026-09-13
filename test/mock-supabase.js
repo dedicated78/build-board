@@ -181,13 +181,22 @@
   Client.prototype.from = function (t) { return new Q(this, t); };
   Client.prototype.rpc = function (fn, args) {
     var d = load(), self = this;
+    // mirrors public.accept_invite(): distinct reasons, and idempotent when
+    // the account is already on the project
     if (fn === "accept_invite") {
       var me = this._me();
-      var inv = (d.invites || []).filter(function (i) {
-        return i.token === args.t && !i.accepted && String(i.email).toLowerCase() === String(me.email).toLowerCase();
-      })[0];
-      if (!inv) return Promise.resolve({ data: null, error: { message: "That invitation is not valid any more." } });
+      var inv = (d.invites || []).filter(function (i) { return i.token === args.t; })[0];
+      var fail = function (m) { return Promise.resolve({ data: null, error: { message: m } }); };
+      if (!inv) return fail("invite_not_found");
+      if (String(inv.email).toLowerCase() !== String(me.email).toLowerCase()) return fail("invite_email_mismatch");
       d.memberships = d.memberships || [];
+      var had = d.memberships.filter(function (m) { return m.site === inv.site && m.person === me.id; })[0];
+      if (had) {
+        inv.accepted = inv.accepted || new Date().toISOString(); save(d);
+        return Promise.resolve({ data: [{ site: inv.site, role: had.role }], error: null });
+      }
+      if (inv.accepted) return fail("invite_used");
+      if (new Date(inv.expires) <= new Date()) return fail("invite_expired");
       d.memberships.push({ site: inv.site, person: me.id, role: inv.role });
       inv.accepted = new Date().toISOString(); save(d);
       return Promise.resolve({ data: [{ site: inv.site, role: inv.role }], error: null });

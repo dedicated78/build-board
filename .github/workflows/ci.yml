@@ -42,3 +42,6 @@ jobs:
 
       - name: Identity, roster sync and permissions
         run: node test/identity.test.js
+
+      - name: Boot, view persistence and rejoin
+        run: node test/boot.test.js

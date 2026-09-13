@@ -56,6 +56,22 @@ head = """<style>
   #gate .err{font-size:12.5px;color:var(--red);margin:12px 0 0;line-height:1.5;display:none}
   #gate .err.on{display:block}
   #gate .gfoot{text-align:center;font-size:11.5px;color:var(--muted);margin:16px 0 0}
+  #gate .ghost{background:transparent;color:var(--navy-2);border:1px solid var(--line);margin-top:10px}
+  #gate .ghost:hover{background:var(--paper);color:var(--navy)}
+  /* a quiet branded wait, never a spinner that outlives the load */
+  #boot{position:fixed;inset:0;z-index:9998;background:var(--cream);display:flex;align-items:center;
+    justify-content:center;padding:24px;font-family:"IBM Plex Sans",system-ui,sans-serif}
+  #boot .bwrap{text-align:center}
+  #boot .eb{font-family:"Archivo",system-ui,sans-serif;font-size:10.5px;font-weight:700;
+    letter-spacing:.15em;text-transform:uppercase;color:var(--navy-2)}
+  #boot .nm{font-family:"Archivo",system-ui,sans-serif;font-size:24px;font-weight:700;
+    letter-spacing:-.02em;color:var(--navy);line-height:1.2;margin-top:3px}
+  #boot .st{font-size:13px;color:var(--muted);margin-top:8px}
+  #boot .bar{width:148px;height:3px;border-radius:99px;background:#E5DED2;overflow:hidden;margin:16px auto 0}
+  #boot .bar i{display:block;width:40%;height:100%;background:var(--teal);border-radius:99px;
+    animation:bootslide 1.1s ease-in-out infinite}
+  @keyframes bootslide{0%{transform:translateX(-100%)}100%{transform:translateX(320%)}}
+  @media (prefers-reduced-motion:reduce){#boot .bar i{animation:none;width:100%}}
 
   /* ---- account: inline in the header on desktop, inside .acct on mobile ---- */
   #whoami{display:none;flex-direction:column;align-items:stretch;gap:6px;width:100%;
@@ -86,6 +102,12 @@ head = """<style>
   body.role-viewer #addMeeting, body.role-viewer #xAdd{display:none!important}
 
 </style>
+<div id="boot"><div class="bwrap">
+  <div class="eb">RMM Builders Ltd</div>
+  <div class="nm">Build Board</div>
+  <div class="st" id="bootMsg">Loading&hellip;</div>
+  <div class="bar"><i></i></div>
+</div></div>
 <div id="gate" hidden><div class="gwrap">
   <div class="glock">
     <div class="eb">RMM Builders Ltd</div>
@@ -136,7 +158,11 @@ boot = """
   var bar  = document.createElement("div");
   bar.id = "whoami";
   if (slot) slot.appendChild(bar); else document.body.appendChild(bar);
-  if (!PB.client()) { gate.parentNode.removeChild(gate); return; }  // unconfigured: local mode
+  if (!PB.client()) {                      // unconfigured: local demo, no shell, no gate
+    gate.parentNode.removeChild(gate);
+    var b0 = document.getElementById("boot"); if (b0) b0.parentNode.removeChild(b0);
+    return;
+  }
 
   function esc(s) { return String(s == null ? "" : s).replace(/[<>&"]/g, ""); }
 
@@ -206,10 +232,14 @@ boot = """
         .catch(function (err) {
           b2.disabled = false; b2.textContent = "Create account";
           var m = (err && err.message) || "";
+          if (/already registered/i.test(m)) {
+            try { sessionStorage.setItem("pendingInviteToken", token); } catch (x) {}
+            return openGate("You already have an account. Sign in to accept this invitation.");
+          }
           e2.textContent =
             m === "NEEDS_CONFIRM" ? "Account created. Check your email to confirm it, then sign in." :
             /invitation only|not valid/i.test(m) ? m :
-            /already registered/i.test(m) ? "That email already has an account — sign in instead, then open this link again." :
+            /already registered/i.test(m) ? "" :
             /password/i.test(m) ? "Pick a password of at least 8 characters." :
             "Couldn't create the account. Ask your admin for a fresh invite link.";
           e2.classList.add("on");
@@ -219,6 +249,8 @@ boot = """
 
   function openGate(msg) {
     gate.hidden = false;
+    var card = gate.querySelector(".gcard");
+    if (!document.getElementById("gateForm")) { card.innerHTML = signInCard; bindSignIn(); }
     var err = document.getElementById("gErr");
     if (msg) { err.textContent = msg; err.classList.add("on"); }
   }
@@ -231,39 +263,91 @@ boot = """
     if (/invite=[0-9a-f-]{36}/i.test(location.hash)) location.reload();
   });
 
+  var signInCard = gate.querySelector(".gcard").innerHTML;   // kept so we can come back to it
+
+  function bootMsg(t) { var b = document.getElementById("bootMsg"); if (b) b.textContent = t; }
+  function hideBoot() { var b = document.getElementById("boot"); if (b) b.hidden = true; }
+
+  /* An account with no memberships may still hold a valid invitation, so the
+     invitation is always tried first. Nobody is told they are not on a project
+     until that has been resolved. */
+  function consumeInvite(tok) {
+    bootMsg("Accepting your invitation\u2026");
+    return PB.acceptInvite(tok).then(function () {
+      try { sessionStorage.removeItem("pendingInviteToken"); } catch (e) {}
+      location.hash = "";
+      location.reload();            // one clean load of the joined project
+    });
+  }
+
   PB.ready().then(function (r) {
-    if (r.ok && token) {
-      // already signed in, opening a link for another project
-      return PB.acceptInvite(token)
-        .then(function () { location.hash = ""; location.reload(); })
-        .catch(function (e) { chrome(); alert(e.message || "That invitation is not valid any more."); });
+    var signedIn = r.ok || r.reason === "noproject";
+    var pending = token || (function () {
+      try { return sessionStorage.getItem("pendingInviteToken") || ""; } catch (e) { return ""; }
+    })();
+
+    if (signedIn && pending) {
+      return consumeInvite(pending).catch(function (e) {
+        var msg = PB.inviteErrorText ? PB.inviteErrorText(e) : "That invitation is no longer valid.";
+        try { sessionStorage.removeItem("pendingInviteToken"); } catch (x) {}
+        if (r.ok) { hideBoot(); chrome(); toastLike(msg); return; }
+        hideBoot(); openNoProject(msg);
+      });
     }
-    if (token && !r.ok) return openSignup();
-    if (r.ok) return chrome();
+    if (r.ok) { hideBoot(); return chrome(); }
+    if (r.reason === "noproject") { hideBoot(); return openNoProject(""); }
+
+    // signed out
+    hideBoot();
+    if (token) { try { sessionStorage.setItem("pendingInviteToken", token); } catch (e) {} return openSignup(); }
     if (r.reason === "profile")
-      return openGate("Signed in, but this account isn't on a project yet — ask your admin to add you.");
+      return openGate("We couldn't load your profile. Sign in again, or ask your admin to check your account.");
     openGate("");
   });
 
-  var form = document.getElementById("gateForm"),
-      err  = document.getElementById("gErr"),
-      btn  = document.getElementById("gBtn");
-  form.onsubmit = function (ev) {
-    ev.preventDefault();
-    btn.disabled = true; btn.textContent = "Signing in…"; err.classList.remove("on");
-    PB.login(document.getElementById("gEmail").value.trim(),
-             document.getElementById("gPass").value)
-      .then(function () { location.reload(); })
-      .catch(function (e) {
-        btn.disabled = false; btn.textContent = "Sign in";
-        var m = (e && (e.message || e.error_description)) || "";
-        err.textContent = /member of any site/.test(m)
-          ? "That account isn't on a project yet — ask your admin to add you."
-          : (/fetch|network|Failed/i.test(m) ? "Can't reach the server. Check your connection and try again."
-                                             : "Wrong email or password.");
-        err.classList.add("on");
-      });
-  };
+  function toastLike(msg) {
+    var t = document.getElementById("toast");
+    if (!t) { alert(msg); return; }
+    t.textContent = msg; t.classList.add("show");
+    setTimeout(function () { t.classList.remove("show"); }, 5200);
+  }
+
+  /* A real, valid state: signed in and on no project at all. */
+  function openNoProject(msg) {
+    gate.hidden = false;
+    var card = gate.querySelector(".gcard");
+    card.innerHTML =
+      "<h1>You're not currently part of a project</h1>" +
+      "<p>" + (msg ? String(msg).replace(/[<>&]/g, "") + " " : "") +
+      "Ask a project owner or admin to invite you. If you have an invitation link, open it while signed in.</p>" +
+      '<button type="button" class="ghost" id="npOut">Sign out</button>';
+    document.getElementById("npOut").onclick = function () { PB.logout(); };
+  }
+
+  // bound on first load, and again whenever the card is restored
+  function bindSignIn() {
+    var form = document.getElementById("gateForm"),
+        err  = document.getElementById("gErr"),
+        btn  = document.getElementById("gBtn");
+    if (!form) return;
+    form.onsubmit = function (ev) {
+      ev.preventDefault();
+      btn.disabled = true; btn.textContent = "Signing in…"; err.classList.remove("on");
+      PB.login(document.getElementById("gEmail").value.trim(),
+               document.getElementById("gPass").value)
+        // a pending invitation is consumed automatically on the next pass
+        .then(function () { location.reload(); })
+        .catch(function (e) {
+          btn.disabled = false; btn.textContent = "Sign in";
+          var m = (e && (e.message || e.error_description)) || "";
+          err.textContent = /fetch|network|Failed/i.test(m)
+            ? "Can't reach the server. Check your connection and try again."
+            : "Wrong email or password.";
+          err.classList.add("on");
+        });
+    };
+  }
+  bindSignIn();
 })();
 """
 tail = d.rindex("</script>")

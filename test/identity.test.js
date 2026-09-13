@@ -177,7 +177,7 @@ await openAcct();await p.click('#acctMe');await p.waitForTimeout(500);
 await p.reload();await p.waitForTimeout(1700);
 t('13. refreshing My Work restores My Work', await p.evaluate(()=>!document.getElementById('view-me').hidden));
 t('14. the saved view is scoped per project and person', await p.evaluate(()=>
-  Object.keys(localStorage).some(k=>/^rmm-view:s1:MH-1$/.test(k))));
+  Object.keys(localStorage).some(k=>/^build-board:view:s1:MH-1$/.test(k))));
 
 /* ---------- privacy ---------- */
 t('34. My Work privacy holds: another key is unreadable', await p.evaluate(async()=>{
