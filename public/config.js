@@ -2,8 +2,8 @@
    API. Row-level security is what protects the data. Never put the service
    role key in here. */
 window.RMM_CONFIG = {
-  supabaseUrl: "https://YOUR-PROJECT.supabase.co",
-  supabaseKey: "YOUR-ANON-PUBLIC-KEY",
+  supabaseUrl: "https://zijncucnubcpxtwvkaqv.supabase.co",
+  supabaseKey: "sb_publishable_w_VyTpnBTSmAl0n3-IPysg_JAzjaaaV",
   // Optional endpoint that drafts the report commentary server-side.
   ai: ""
 };
