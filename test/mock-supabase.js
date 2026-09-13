@@ -82,6 +82,8 @@
   };
   // returns null when allowed, or a message when the policy refuses
   Client.prototype._refuse = function (t, row, op) {
+    // people: you may only edit your own row (mirrors the people_self policy)
+    if (t === "people") return row.id === this._uid() ? null : "blocked";
     var r = this._rank(row.site !== undefined ? row.site : row.id);
     if (t === "invites") {
       if (r < RANK.admin) return "new row violates row-level security policy for table \"invites\"";

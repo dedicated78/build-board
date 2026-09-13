@@ -149,9 +149,15 @@
       var rm = el("button", "ac-mini", "Remove"); rm.type = "button";
       rm.onclick = function () {
         rm.textContent = "Removing…";
-        PB.removeMember(m.id).then(done).catch(function (e) {
-          rm.textContent = "Remove"; msg.textContent = e.message; msg.style.display = "block";
-        });
+        PB.removeMember(m.id)
+          .then(function () {
+            // the roster row stays so historic tasks still name them
+            return PB.deactivateMember ? PB.deactivateMember(m.member) : null;
+          })
+          .then(done)
+          .catch(function (e) {
+            rm.textContent = "Remove"; msg.textContent = e.message; msg.style.display = "block";
+          });
       };
       row.appendChild(rm);
     }
@@ -195,7 +201,8 @@
     var email = field("Email", "acEmail", "email", "name@company.com", true);
     email.required = true;
     var name = field("Full name", "acName", "text", "SEO Worker 2");
-    var member = field("Board key", "acMember", "text", "SEO-2");
+    name.required = true;
+    var member = field("Board key", "acMember", "text", "leave blank to generate");
 
     var rw = el("div", "full");
     rw.appendChild(el("label", null, "Role"));
@@ -215,7 +222,12 @@
     f.onsubmit = function (ev) {
       ev.preventDefault();
       btn.disabled = true; btn.textContent = "Creating…"; out.innerHTML = "";
-      PB.invite({ email: email.value, name: name.value, member: member.value, role: sel.value })
+      // the board key is a permanent internal identifier, never derived from
+      // the email address and never editable afterwards
+      var key = member.value.trim() || ("USR-" + Array.from({ length: 8 }, function () {
+        return "0123456789ABCDEF"[Math.floor(Math.random() * 16)];
+      }).join(""));
+      PB.invite({ email: email.value, name: name.value.trim(), member: key, role: sel.value })
         .then(function (inv) {
           btn.disabled = false; btn.textContent = "Create invitation";
           email.value = name.value = member.value = "";

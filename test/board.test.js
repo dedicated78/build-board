@@ -30,6 +30,7 @@ await ctx.route('**/supabase.js',r=>r.fulfill({status:200,contentType:'text/java
 await ctx.addInitScript(s=>{if(!localStorage.getItem('mocksb'))localStorage.setItem('mocksb',JSON.stringify(s));},seed);
 const p=await ctx.newPage();const errs=[];p.on('pageerror',e=>errs.push(e.message));
 const rows=c=>p.evaluate(k=>JSON.parse(localStorage.getItem('mocksb'))[k],c);
+const openAcct=async()=>{if(!(await p.evaluate(()=>document.body.classList.contains('acct-open')))){await p.click('#meBtn');await p.waitForTimeout(250);}};
 
 await p.goto('http://localhost:8896/');await p.waitForTimeout(900);
 t('sign-in gate blocks the board', await p.evaluate(()=>{const g=document.getElementById('gate');return g&&!g.hidden;}));
@@ -59,13 +60,13 @@ await p.reload();await p.waitForTimeout(1600);
 t('reload keeps the session', await p.evaluate(()=>{const g=document.getElementById('gate');return (!g||g.hidden)&&document.querySelectorAll('.card').length===3;}));
 t('the edit survived the reload', await rows('tasks').then(r=>r.find(x=>x.key==='RMM-004').body.status==='review'));
 
-await p.selectOption('#siteSel','s2');await p.waitForTimeout(1800);
+await openAcct();await p.selectOption('#siteSel','s2');await p.waitForTimeout(1800);
 t('switching project loads only that tenant', await p.evaluate(()=>document.querySelectorAll('.card').length===1&&document.body.textContent.includes('GBP rebuild')));
-await p.selectOption('#siteSel','s1');await p.waitForTimeout(1800);
+await openAcct();await p.selectOption('#siteSel','s1');await p.waitForTimeout(1800);
 t('switching back restores the first project', await p.evaluate(()=>document.querySelectorAll('.card').length===3));
 
 // second account: privacy the other way round
-await p.click('#signOut');await p.waitForTimeout(1400);
+await openAcct();await p.click('#signOut');await p.waitForTimeout(1400);
 await p.fill('#gEmail','dev@growwithmh.com');await p.fill('#gPass','pw12345678');await p.click('#gBtn');await p.waitForTimeout(1800);
 t('a second member signs in as themselves', await p.evaluate(()=>localStorage.getItem('rmm-board-me')==='DEV-2'));
 t('they cannot see the other member\'s private notes', !(await p.evaluate(()=>document.body.textContent.includes('mine only'))));

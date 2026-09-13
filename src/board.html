@@ -419,6 +419,10 @@
   .pf-photo:hover .ov, .pf-photo:focus-visible .ov { opacity: 1; }
   .pf-id { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
   .pf-id .who { display: flex; flex-direction: column; gap: 5px; min-width: 210px; }
+  .pf-id .who .pf-name {
+    font-family: var(--f-display); font-size: 19px; font-weight: 700; letter-spacing: -.01em;
+    color: var(--ink); margin: 0;
+  }
   .pf-id .who select {
     font: inherit; font-family: var(--f-display); font-size: 19px; font-weight: 700; letter-spacing: -.01em;
     color: var(--ink); background: transparent; border: 0; border-bottom: 1px dashed var(--line);
@@ -641,14 +645,26 @@
   .checks label:hover { color: var(--ink); }
 
   /* ---------- account menu ---------- */
-  .acct { display: flex; align-items: center; gap: 8px; }
+  .acct {
+    position: absolute; top: calc(100% + 10px); right: 0; z-index: 46;
+    display: none; flex-direction: column; align-items: stretch; gap: 6px;
+    width: min(272px, calc(100vw - 32px)); padding: 10px;
+    background: var(--surface-elevated); border: 1px solid var(--line);
+    border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+  }
+  body.acct-open .acct { display: flex; }
+  .acct-id { display: block; padding: 4px 4px 9px; border-bottom: 1px solid var(--line-soft); margin-bottom: 2px; }
+  .acct-id .nm { display: block; font-family: var(--f-display); font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.25; }
+  .acct-id .mt { display: block; font-size: 12px; color: var(--ink-3); margin-top: 2px; }
   .acct-item {
     border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
     font-family: var(--f-display); font-size: 12.5px; font-weight: 600;
     padding: 6px 12px; border-radius: var(--radius-sm); min-height: 34px; text-align: left;
   }
   .acct-item:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
-  .acct-id { display: none; }
+  .acct-item { width: 100%; min-height: 42px; }
+  /* shown only for an owner or admin on an authenticated board */
+  #invitePerson { display: none; }
 
   @media (max-width: 1020px) {
     .board { grid-template-columns: repeat(2, minmax(0,1fr)); }
@@ -680,21 +696,7 @@
     }
     .bell { width: 40px; height: 40px; }
 
-    /* --- account: a sheet under the avatar, replacing the old floating bar --- */
-    .acct {
-      position: absolute; top: calc(100% + 10px); right: 0; z-index: 46;
-      display: none; flex-direction: column; align-items: stretch; gap: 6px;
-      width: min(268px, calc(100vw - 32px)); padding: 10px;
-      background: var(--surface-elevated); border: 1px solid var(--line);
-      border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
-    }
-    body.acct-open .acct { display: flex; }
-    .acct-item { width: 100%; min-height: 42px; }
-    .acct-id {
-      display: block; padding: 4px 4px 8px; border-bottom: 1px solid var(--line-soft); margin-bottom: 2px;
-    }
-    .acct-id .nm { display: block; font-family: var(--f-display); font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.25; }
-    .acct-id .mt { display: block; font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+    .acct { width: min(272px, calc(100vw - 24px)); }
 
     /* sections become full-bleed bands rather than floating cards */
     #view-board { gap: 0 !important; }
@@ -833,6 +835,10 @@
     .nt { padding: 13px 16px; }
     @keyframes trayIn { from { opacity: 0; transform: scale(.96) translateY(-6px); } to { opacity: 1; transform: none; } }
 
+    /* a right-aligned panel action would sit under the floating button */
+    #view-board .panel-head { flex-direction: column; align-items: stretch; gap: 10px; }
+    #view-board .panel-head .linkbtn { align-self: flex-start; }
+
     /* --- lists --- */
     .mtg { flex-wrap: wrap; padding: 13px 0; }
     .mtg .avarow { order: 3; margin-left: 56px; margin-top: 6px; }
@@ -924,7 +930,7 @@
         <button class="avabtn" id="meBtn" aria-label="Your profile" aria-haspopup="menu" aria-expanded="false"></button>
         <!-- account: inline in the header on desktop, a sheet under the avatar on mobile -->
         <div class="acct no-print" id="acct">
-          <button class="acct-item m-only" id="acctMe" type="button">My work</button>
+          <button class="acct-item" id="acctMe" type="button">My work</button>
           <div id="acctSlot"></div>
         </div>
       </div>
@@ -1006,9 +1012,10 @@
       <div class="panel-head">
         <div>
           <h2>The team</h2>
-          <p class="sub">Add people, rename them, set weekly capacity. Click a row for their full profile.</p>
+          <p class="sub" id="teamSub">Add people, rename them, set weekly capacity. Click a row for their full profile.</p>
         </div>
         <button class="linkbtn" id="addPerson">Add person</button>
+        <button class="linkbtn" id="invitePerson">Invite person</button>
       </div>
       <table class="team">
         <thead><tr><th>Team member</th><th class="num">Open</th><th class="num">Live</th><th class="num">Blocked</th><th class="num">Pages committed / week</th></tr></thead>
@@ -1496,10 +1503,34 @@
       r.readAsDataURL(file);
     });
   }
+  /* Supabase configured at all — the legacy identity picker may only appear
+     when this is false (an unconfigured local demo). */
+  function live() { return !!(window.PB && PB.live && PB.live()); }
+  /* configured AND signed in with a resolved board key */
+  function authed() { return !!(window.PB && PB.authed && PB.authed()); }
+  function myKey() { return (window.PB && PB.me && PB.me()) || ""; }
+
+  /* Anyone who can still be given work. Inactive profiles stay in state.team
+     so a task assigned years ago still renders the right name. */
   var teamIds = function () {
+    return Object.keys(state.team).filter(function (id) {
+      var m = state.team[id];
+      return m && m.name && m.active !== false;
+    }).sort(function (a, b) { return String(state.team[a].name).localeCompare(String(state.team[b].name)); });
+  };
+  /* every profile ever, active or not — for resolving historic assignments */
+  var allTeamIds = function () {
     return Object.keys(state.team).filter(function (id) { return state.team[id] && state.team[id].name; })
       .sort(function (a, b) { return String(state.team[a].name).localeCompare(String(state.team[b].name)); });
   };
+
+  /* Postgres error codes are not a user interface. */
+  function saveErr(e, what) {
+    var msg = (window.PB && PB.friendlyError) ? PB.friendlyError(e) : "Couldn't save. Please try again.";
+    if (what === "inventory" && /permission/i.test(msg))
+      return "Only an owner or admin can change the approved page inventory. Discuss changes with the project manager.";
+    return msg;
+  }
   var plural = function (n, word) { return n + " " + word + (n === 1 && /s$/.test(word) ? "" : ""); };
 
   function toast(msg, ms) {
@@ -1535,7 +1566,7 @@
   }
   function putMeeting(id, body) {
     state.meetings[id] = body;
-    if (db) db.doc("meetings/" + id).set(body).catch(function (e) { toast("Couldn't save: " + e.code); });
+    if (db) db.doc("meetings/" + id).set(body).catch(function (e) { toast(saveErr(e, "meeting")); });
     else localSave();
     render();
   }
@@ -1564,7 +1595,7 @@
   }
   function putTask(id, body) {
     state.tasks[id] = body;
-    if (db) db.doc("tasks/" + id).set(body).catch(function (e) { toast("Couldn't save: " + e.code); });
+    if (db) db.doc("tasks/" + id).set(body).catch(function (e) { toast(saveErr(e, "task")); });
     else localSave();
     render();
   }
@@ -1576,7 +1607,7 @@
   }
   function putTeam(id, body) {
     state.team[id] = body;
-    if (db) db.doc("team/" + id).set(body).catch(function (e) { toast("Couldn't save: " + e.code); });
+    if (db) db.doc("team/" + id).set(body).catch(function (e) { toast(saveErr(e, "team")); });
     else localSave();
     render();
   }
@@ -1590,13 +1621,13 @@
     render();
   }
   function putInventory() {
-    if (db) db.doc("meta/inventory").set({ items: state.inventory, label: state.invLabel }).catch(function (e) { toast("Couldn't save: " + e.code); });
+    if (db) db.doc("meta/inventory").set({ items: state.inventory, label: state.invLabel }).catch(function (e) { toast(saveErr(e, "inventory"), 5200); });
     else localSave();
     render();
   }
   function putBrand() {
     // set() replaces the whole document, so a removed logo is genuinely gone
-    if (db) db.doc("meta/brand").set(state.brand).catch(function (e) { toast("Couldn't save: " + e.code); });
+    if (db) db.doc("meta/brand").set(state.brand).catch(function (e) { toast(saveErr(e, "brand")); });
     else localSave();
   }
   function logEvent(text) {
@@ -2075,6 +2106,20 @@
   var mwShowReport = false;
   function renderMe() {
     if (!state.me || !state.team[state.me]) {
+      /* Signed in: the account decides who you are. Never offer a picker —
+         either the roster row is still being created, or something failed. */
+      if (live()) {
+        var sync = (window.PB.teamSync && PB.teamSync()) || null;
+        $("mwHead").innerHTML = (sync && sync.ok === false)
+          ? '<div class="mw-pick"><h2 style="font-size:18px">We couldn\'t set up your workspace</h2>' +
+            '<p class="sub" style="margin:0;max-width:60ch">' + esc(sync.message || "Your profile could not be created.") +
+            '</p><button class="btn" id="mwRetry" style="align-self:flex-start;margin-top:12px">Try again</button></div>'
+          : '<div class="mw-pick"><h2 style="font-size:18px">Setting up your workspace&hellip;</h2>' +
+            '<p class="sub" style="margin:0;max-width:60ch">Creating your profile on this project. This only happens once.</p></div>';
+        $("mwList").hidden = true; $("mwLog").hidden = true; $("mwPaper").hidden = true;
+        return;
+      }
+      /* Unconfigured local demo only. */
       var ids = teamIds();
       $("mwHead").innerHTML = '<div class="mw-pick"><h2 style="font-size:18px">Who are you?</h2>' +
         '<p class="sub" style="margin:0;max-width:60ch">Pick your name and this becomes your own workspace — just the tasks assigned to you, ' +
@@ -2116,10 +2161,13 @@
           '<span class="ov">' + (m.photo ? "Change<br>photo" : "Add<br>photo") + "</span>" +
         "</button>" +
         '<input type="file" id="pfFile" accept="image/*" hidden>' +
-        '<div class="who"><select id="pfWho" aria-label="Who you are">' +
-          teamIds().map(function (k) {
-            return "<option value='" + esc(k) + "'" + (k === state.me ? " selected" : "") + ">" + esc(state.team[k].name) + "</option>";
-          }).join("") + "</select>" +
+        '<div class="who">' +
+          (live()
+            ? '<h2 class="pf-name">' + esc(m.name || "You") + "</h2>"
+            : '<select id="pfWho" aria-label="Who you are">' +
+              allTeamIds().map(function (k) {
+                return "<option value='" + esc(k) + "'" + (k === state.me ? " selected" : "") + ">" + esc(state.team[k].name) + "</option>";
+              }).join("") + "</select>") +
           '<div class="pf-meta"><span>' + esc(m.role || "Team member") + "</span>" +
           (m.perWeek ? "<span>&middot;</span><span>" + m.perWeek + " pages a week</span>" : "") +
           (m.photo ? '<span>&middot;</span><button class="linkbtn tiny" id="pfClear">Remove photo</button>' : "") +
@@ -2286,7 +2334,9 @@
         "<td class='num' data-label='Pages'><div class='load'><span class='bar'><i class='" + (s.committed > cap ? "over" : "") +
         "' style='width:" + pct + "%'></i></span><span>" + s.committed + "/" + cap + "</span></div></td></tr>";
     }).join("");
-    $("teamBody").innerHTML = rows || "<tr><td colspan='5' class='empty'>Nobody on the board yet — use “Add person”.</td></tr>";
+    $("teamBody").innerHTML = rows || ("<tr><td colspan='5' class='empty'><b>No active team members yet.</b>" +
+      (live() ? "People appear here automatically after accepting their project invitation."
+              : "Use “Add person” to build the roster.") + "</td></tr>");
 
     var panel = $("profilePanel");
     if (!state.profile || !state.team[state.profile]) { panel.hidden = true; return; }
@@ -2517,8 +2567,22 @@
     var b = $("bell");
     if (b) root.style.setProperty("--bell-bot", Math.round(b.getBoundingClientRect().bottom) + "px");
   }
+  /* Scoped so two projects, or two people on one browser, never overwrite
+     each other's last page. Deliberately not the URL hash — #invite= belongs
+     to the invitation flow. */
+  function viewKey() {
+    var s = (window.PB && PB.siteId && PB.siteId()) || "local";
+    return "rmm-view:" + s + ":" + (state.me || "anon");
+  }
+  var VIEWS = { board: 1, team: 1, report: 1, me: 1 };
+  function rememberView(v) { try { if (VIEWS[v]) localStorage.setItem(viewKey(), v); } catch (e) {} }
+  function savedView() {
+    try { var v = localStorage.getItem(viewKey()); return VIEWS[v] ? v : ""; } catch (e) { return ""; }
+  }
+
   function setView(v) {
     state.view = v;
+    rememberView(v);
     $("fabAdd").style.display = v === "board" ? "" : "none";
     $("repFab").style.display = v === "report" ? "" : "none";
     setRepMenu(false);
@@ -2673,7 +2737,9 @@
     editingPerson = id || newPersonId();
     if (isNew) m = { name: "", role: "", perWeek: 0 };
     $("pId").textContent = editingPerson;
-    $("pHead").textContent = isNew ? "Add someone" : m.name;
+    var self = live() && editingPerson === state.me;
+    $("pRemove").hidden = !!self;      // leaving a project is an admin action, not a self-service one
+    $("pHead").textContent = isNew ? "Add someone" : (self ? "My profile" : m.name);
     $("pName").value = m.name || "";
     $("pRole").value = m.role || "";
     $("pWeek").value = Number(m.perWeek) || 0;
@@ -2710,6 +2776,11 @@
     var name = $("pName").value.trim();
     if (!name) { $("pName").focus(); toast("Give them a name first"); return; }
     var prev = state.team[editingPerson];
+    // renaming yourself renames the account too, so one name shows everywhere
+    if (live() && editingPerson === state.me && window.PB.saveDisplayName && name !== (prev && prev.name)) {
+      PB.saveDisplayName(name).then(function () { renderAvaBtn(); })
+        .catch(function (e) { toast(saveErr(e, "profile")); });
+    }
     putTeam(editingPerson, {
       name: name, role: $("pRole").value.trim(),
       perWeek: Math.max(0, Number($("pWeek").value) || 0),
@@ -3421,15 +3492,23 @@
 
   // desktop keeps the account controls inline in the header, so the avatar goes
   // straight to My work; on mobile it opens the account sheet instead
-  function acctMobile() { return window.matchMedia("(max-width: 700px)").matches; }
+  // a menu exists once there is an account behind it; the offline demo has none
+  function hasAcctMenu() { return live() || $("acctSlot").children.length > 0; }
   function setAcct(open) {
     document.body.classList.toggle("acct-open", !!open);
     $("meBtn").setAttribute("aria-expanded", open ? "true" : "false");
   }
   $("meBtn").addEventListener("click", function (e) {
-    if (!acctMobile()) { setAcct(false); setView("me"); return; }
+    if (!hasAcctMenu()) { setAcct(false); setView("me"); return; }
     e.stopPropagation();
     setAcct(!document.body.classList.contains("acct-open"));
+  });
+  // "My profile" is rendered by the shell, so it is bound by delegation
+  document.addEventListener("click", function (e) {
+    if (!e.target.closest("#myProfile")) return;
+    setAcct(false);
+    if (state.me && state.team[state.me]) openPerson(state.me);
+    else { setView("me"); }
   });
   $("acctMe").addEventListener("click", function () { setAcct(false); setView("me"); });
   document.addEventListener("click", function (e) {
@@ -3438,7 +3517,7 @@
     setAcct(false);
   });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") setAcct(false); });
-  window.addEventListener("resize", function () { if (!acctMobile()) setAcct(false); });
+  window.addEventListener("resize", function () { setAcct(false); });
   document.addEventListener("click", function (e) {
     if (e.target.closest("#pfPhoto")) { $("pfFile").click(); return; }
     if (e.target.closest("#pfClear")) {
@@ -3456,6 +3535,7 @@
   });
   document.addEventListener("change", function (e) {
     if (e.target.id === "pfWho") {
+      if (live()) { e.target.value = state.me; return; }
       state.me = e.target.value;
       try { localStorage.setItem("rmm-board-me", state.me); } catch (err) {}
       seenKeys = null; state.openTask = null;
@@ -3554,6 +3634,10 @@
   $("pClose").addEventListener("click", closePerson);
   $("pCancel").addEventListener("click", closePerson);
   $("pSave").addEventListener("click", savePerson);
+  $("invitePerson").addEventListener("click", function () {
+    if (window.ACCESS && ACCESS.open) ACCESS.open();
+    else toast("Invitations are managed from People & access.");
+  });
   $("pRemove").addEventListener("click", showRemoveBox);
   $("pRemoveGo").addEventListener("click", removePerson);
   $("dClose").addEventListener("click", closeDrawer);
@@ -3597,6 +3681,7 @@
   });
   $("dType").addEventListener("change", function () { $("dUnit").value = unitFor($("dWs").value, this.value); });
   $("mePick").addEventListener("change", function () {
+    if (live()) { $("mePick").value = state.me; return; }
     state.me = this.value;
     try { localStorage.setItem("rmm-board-me", state.me); } catch (err) {}
     seenKeys = null;           // switching person is a fresh slate, not a burst of toasts
@@ -3607,6 +3692,7 @@
   $("wsFilter").addEventListener("change", function () { state.wsFilter = this.value; render(); });
   document.addEventListener("change", function (e) {
     if (e.target.id !== "mwWho" || !e.target.value) return;
+    if (live()) return;
     state.me = e.target.value;
     try { localStorage.setItem("rmm-board-me", state.me); } catch (err) {}
     seenKeys = null;
@@ -3760,7 +3846,7 @@
   if (window.innerWidth <= 700) $("brandbar").classList.add("collapsed");
   syncRepPanel();
   render();
-  setView(state.me ? "me" : "board");
+  setView("board");   // never My Work by default; the saved view is restored after auth resolves
   syncAppbar();
   window.addEventListener("resize", syncAppbar);
   setTimeout(syncAppbar, 600);
@@ -3778,6 +3864,13 @@
       return;
     }
     $("connText").textContent = "Saving live";
+    // the signed-in account IS the identity, at every render from here on
+    if (PB.me && PB.me()) state.me = PB.me();
+    document.body.classList.add("auth-live");
+    if (PB.isAdmin && PB.isAdmin()) document.body.classList.add("can-admin");
+    var restore = savedView();
+    setView(restore || "board");
+    if (state.view === "me") renderMe();
     db.collection("tasks").onSnapshot(function (snap) {
       var next = {}; snap.docs.forEach(function (d) { next[d.id] = clone(d.data()) || {}; });
       state.tasks = next; render();

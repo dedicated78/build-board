@@ -99,8 +99,29 @@
     };
   }
 
+  /* Postgres speaks in codes; people do not. */
+  function friendlyError(e) {
+    var m = String((e && (e.message || e.error_description || e.details || e.code)) || "");
+    if (/42501|permission denied|row-level security|violates row-level/i.test(m))
+      return "You don't have permission to change that. Ask an owner or admin.";
+    if (/23505|duplicate key|unique constraint/i.test(m))
+      return "That already exists.";
+    if (/JWT|token is expired|invalid claim/i.test(m))
+      return "Your session has expired — sign in again.";
+    if (/Failed to fetch|NetworkError|network/i.test(m))
+      return "Can't reach the server. Check your connection and try again.";
+    return "Couldn't save. Please try again.";
+  }
+
   var API = {
     client: function () { return sb; },
+    /* live = Supabase is configured at all; authed = configured AND signed in
+       with a resolved board identity. The legacy identity picker may only
+       appear when live() is false. */
+    live: function () { return !!sb; },
+    authed: function () { return !!(sb && API._session && site && me); },
+    friendlyError: friendlyError,
+    teamSync: function () { return API._teamSync || null; },
     me: function () { return me || ""; },
     role: function () { return role; },
     rank: function (r) { return { owner: 4, admin: 3, editor: 2, viewer: 1 }[r] || 0; },
@@ -168,9 +189,64 @@
     logout: async function () { try { await sb.auth.signOut(); } catch (e) {} location.reload(); },
     useSite: function (id) { localStorage.setItem("rmm-site", id); location.reload(); },
 
+    /* The invitation already decided who this person is. Make sure the board
+       has a roster row for them before anything renders, so nobody is ever
+       asked to pick themselves out of a list. Never overwrites an existing
+       profile — it only fills a missing one, or reactivates one they left. */
+    ensureOwnTeamProfile: async function () {
+      if (!sb || !site || !me) return { ok: false, reason: "identity" };
+      var r = await sb.from("team").select("key,body").eq("site", site).eq("key", me).maybeSingle();
+      if (r.error) throw r.error;
+
+      if (!r.data) {
+        var c = await sb.from("team").insert({
+          site: site, key: me,
+          body: { name: API._name || "", role: "", perWeek: 0, phone: "", hours: "", active: true },
+          updated: new Date().toISOString()
+        });
+        if (c.error) throw c.error;
+        return { ok: true, created: true };
+      }
+
+      var body = r.data.body || {};
+      if (body.active === false) {           // they left and have been invited back
+        var back = Object.assign({}, body, { active: true });
+        var u = await sb.from("team").update({ body: back }).eq("site", site).eq("key", me);
+        if (u.error) throw u.error;
+        return { ok: true, reactivated: true };
+      }
+      return { ok: true, existing: true };   // operational detail is theirs, leave it alone
+    },
+
+    /* One visible name, two places to keep it. */
+    saveDisplayName: async function (name) {
+      name = String(name == null ? "" : name).trim();
+      if (!name) throw new Error("A display name is required.");
+      var a = await sb.from("people").update({ name: name }).eq("id", API._session.user.id);
+      if (a.error) throw a.error;
+      API._name = name;
+      var r = await sb.from("team").select("body").eq("site", site).eq("key", me).maybeSingle();
+      var body = Object.assign({}, (r.data && r.data.body) || {}, { name: name });
+      var u = await sb.from("team").update({ body: body }).eq("site", site).eq("key", me);
+      if (u.error) throw u.error;
+      return name;
+    },
+
+    /* Removal keeps history: the profile stays, marked inactive. */
+    deactivateMember: async function (memberKey) {
+      if (!memberKey) return false;
+      var r = await sb.from("team").select("body").eq("site", site).eq("key", memberKey).maybeSingle();
+      if (r.error || !r.data) return false;
+      var body = Object.assign({}, r.data.body || {}, { active: false });
+      var u = await sb.from("team").update({ body: body }).eq("site", site).eq("key", memberKey);
+      return !u.error;
+    },
+
     connect: async function () {
       var r = await API.ready();
       if (!r.ok) return null;
+      try { API._teamSync = await API.ensureOwnTeamProfile(); }
+      catch (e) { API._teamSync = { ok: false, error: e, message: friendlyError(e) }; }
       return { doc: docRef, collection: collRef };
     },
 

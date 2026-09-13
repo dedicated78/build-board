@@ -39,3 +39,6 @@ jobs:
 
       - name: Roles and invitations
         run: node test/roles.test.js
+
+      - name: Identity, roster sync and permissions
+        run: node test/identity.test.js

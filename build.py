@@ -58,20 +58,26 @@ head = """<style>
   #gate .gfoot{text-align:center;font-size:11.5px;color:var(--muted);margin:16px 0 0}
 
   /* ---- account: inline in the header on desktop, inside .acct on mobile ---- */
-  #whoami{display:none;align-items:center;gap:8px;font:12px "IBM Plex Sans",system-ui,sans-serif;color:var(--navy-2)}
-  #whoami .site{display:inline-flex;align-items:center;background:var(--paper);border:1px solid var(--line);
-    border-radius:8px;padding:0 4px 0 10px;min-height:34px;max-width:200px}
-  #whoami select{border:0;background:transparent;font:600 12.5px "IBM Plex Sans",system-ui,sans-serif;
-    color:var(--navy);max-width:170px;cursor:pointer;min-height:32px}
-  #whoami select:focus{outline:none}
-  #whoami button{border:1px solid var(--line);background:var(--paper);color:var(--navy-2);border-radius:8px;
-    padding:0 12px;min-height:34px;font-size:12.5px;font-weight:600;cursor:pointer;
-    font-family:"Archivo",system-ui,sans-serif}
-  #whoami button:hover{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
-  #whoami .people{background:var(--teal-soft);border-color:transparent;color:#0B4F4A}
-  #whoami .role{font-family:"Archivo",system-ui,sans-serif;font-size:10px;letter-spacing:.1em;
-    text-transform:uppercase;color:var(--muted);font-weight:700;background:var(--cream);
-    border:1px solid var(--line);border-radius:99px;padding:3px 9px}
+  #whoami{display:none;flex-direction:column;align-items:stretch;gap:6px;width:100%;
+    font:12px "IBM Plex Sans",system-ui,sans-serif;color:var(--navy-2)}
+  #whoami button,#whoami .switch{border:1px solid var(--line);background:var(--paper);color:var(--navy-2);
+    border-radius:8px;padding:0 12px;min-height:42px;font-size:13px;font-weight:600;cursor:pointer;
+    font-family:"Archivo",system-ui,sans-serif;text-align:left;display:flex;align-items:center;width:100%}
+  #whoami button:hover,#whoami .switch:hover{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
+  #whoami .switch{flex-direction:column;align-items:stretch;justify-content:center;gap:1px;
+    padding:6px 12px;min-height:54px;color:var(--muted);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+  #whoami .switch select{flex:1 1 auto;min-width:0;border:0;background:transparent;cursor:pointer;
+    font:600 13px "IBM Plex Sans",system-ui,sans-serif;letter-spacing:0;text-transform:none;color:var(--navy)}
+  #whoami .switch select:focus{outline:none}
+  /* signing out is not navigation — it sits apart */
+  #whoami .signout{margin-top:4px;border-top:1px solid var(--line);border-radius:0 0 8px 8px;color:var(--navy-2)}
+  #whoami button:focus-visible,#whoami select:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+
+  /* roster and inventory are project-level: invitation replaces manual adding,
+     and only an owner or admin is offered the inventory editor */
+  body.auth-live #addPerson{display:none!important}
+  body.auth-live.can-admin #invitePerson{display:inline-flex!important}
+  body.auth-live:not(.can-admin) #editInv{display:none!important}
   /* A viewer can read the board and the report, nothing else. The database
      refuses their writes regardless — this just stops them being offered. */
   body.role-viewer #addBtn, body.role-viewer #fabAdd, body.role-viewer [data-add="1"],
@@ -79,15 +85,6 @@ head = """<style>
   body.role-viewer #importPlan, body.role-viewer #editInv, body.role-viewer #addPerson,
   body.role-viewer #addMeeting, body.role-viewer #xAdd{display:none!important}
 
-  @media (max-width:1180px) and (min-width:701px){ #whoami .role{display:none} }
-  @media (max-width:700px){
-    /* inside the avatar sheet: full-width rows, nothing floating over content */
-    #whoami{flex-direction:column;align-items:stretch;gap:6px;width:100%}
-    #whoami .site,#whoami select{max-width:none;width:100%}
-    #whoami .site{min-height:42px}
-    #whoami button{min-height:42px;text-align:left}
-    #whoami .role{display:none}   /* the sheet header already states the role */
-  }
 </style>
 <div id="gate" hidden><div class="gwrap">
   <div class="glock">
@@ -164,12 +161,15 @@ boot = """
                         '<span class="mt">' + (role ? role.charAt(0).toUpperCase() + role.slice(1) : "") +
                         (siteName ? " &middot; " + siteName : "") + "</span>";
 
-    bar.innerHTML = (list.length > 1
-                      ? '<span class="site"><select id="siteSel" aria-label="Project">' + opts + "</select></span>"
-                      : '<span class="site"><span>' + siteName + "</span></span>") +
-                    '<span class="role">' + esc(PB.role() || "") + "</span>" +
+    // one project needs no project control; several get a labelled switcher
+    bar.innerHTML = '<button type="button" id="myProfile">My profile</button>' +
                     (PB.isAdmin() ? '<button type="button" class="people" id="people">Manage people</button>' : "") +
-                    '<button type="button" id="signOut" title="' + esc(PB.name() || "") + '">Sign out</button>';
+                    (list.length > 1
+                      ? '<label class="switch" for="siteSel">Switch project' +
+                        '<select id="siteSel" aria-label="Switch project">' + opts + "</select></label>"
+                      : "") +
+                    '<button type="button" class="signout" id="signOut" title="' +
+                    esc(PB.name() || "") + '">Sign out</button>';
     bar.style.display = "flex";
     var sel = document.getElementById("siteSel");
     if (sel) sel.onchange = function () { PB.useSite(this.value); };

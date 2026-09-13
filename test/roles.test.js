@@ -31,8 +31,9 @@ const signIn=async(em)=>{await p.goto('http://localhost:8894/');await p.waitForT
 
 // ---------- owner ----------
 await signIn('mehedi@growwithmh.com');
-t('owner sees their role in the corner', await p.evaluate(()=>document.querySelector('#whoami .role').textContent==='owner'));
+t('owner sees their role in the account menu', await p.evaluate(()=>/^Owner/.test(document.querySelector('#acctWho .mt').textContent)));
 t('owner gets the People button', await p.evaluate(()=>!!document.getElementById('people')));
+await p.click('#meBtn');await p.waitForTimeout(250);
 await p.click('#people');await p.waitForTimeout(700);
 t('access panel lists everyone on the project', await p.evaluate(()=>document.querySelectorAll('#acc .ac-row .ac-nm').length>=3));
 t('owner may grant every role', await p.evaluate(()=>document.querySelector('#acc .ac-row select').options.length===4));
@@ -68,7 +69,7 @@ await p.fill('#suEmail','new@growwithmh.com');await p.click('#suBtn');await p.wa
 t('the right email creates the account and lands on the board', await p.evaluate(()=>{
   const g=document.getElementById('gate');return (!g||g.hidden)&&document.querySelectorAll('.card').length===1;}));
 t('they arrive with the invited role and key', await p.evaluate(()=>
-  localStorage.getItem('rmm-board-me')==='SEO-2'&&document.querySelector('#whoami .role').textContent==='editor'));
+  localStorage.getItem('rmm-board-me')==='SEO-2'&&/^Editor/.test(document.querySelector('#acctWho .mt').textContent)));
 t('the invitation is spent', await rows('invites').then(i=>!!i[0].accepted));
 t('an editor gets no People button', await p.evaluate(()=>!document.getElementById('people')));
 
