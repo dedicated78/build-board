@@ -1,0 +1,41 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      # the deployable page is generated: fail if it was committed stale
+      - name: Check the build is current
+        run: |
+          cp public/index.html /tmp/committed.html
+          python3 build.py
+          diff -q /tmp/committed.html public/index.html || {
+            echo "::error::public/index.html is out of date — run 'python3 build.py' and commit the result"
+            exit 1
+          }
+
+      - name: Board, auth and tenancy
+        run: node test/board.test.js
+
+      - name: Roles and invitations
+        run: node test/roles.test.js

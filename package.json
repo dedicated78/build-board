@@ -1,0 +1,15 @@
+{
+  "name": "build-board",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Multi-tenant SEO delivery board — Supabase backend, static frontend",
+  "scripts": {
+    "build": "python3 build.py",
+    "test": "node test/board.test.js && node test/roles.test.js",
+    "test:board": "node test/board.test.js",
+    "test:roles": "node test/roles.test.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}
